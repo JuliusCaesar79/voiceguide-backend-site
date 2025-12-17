@@ -3,15 +3,12 @@
 Revision ID: 371cc884da6c
 Revises: eaa684c0bbd7
 Create Date: 2025-12-15 20:01:23.628676
-
 """
 from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
 
-
-# revision identifiers, used by Alembic.
 revision: str = "371cc884da6c"
 down_revision: Union[str, Sequence[str], None] = "eaa684c0bbd7"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -19,26 +16,25 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
-
-    # ✅ Make enum creation safe on Postgres (idempotent)
+    # ✅ SUPER ROBUST: crea il tipo solo se NON esiste
     op.execute(
         """
         DO $$
         BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'trial_request_status') THEN
-                CREATE TYPE trial_request_status AS ENUM ('PENDING', 'ISSUED', 'REJECTED');
-            END IF;
-        END $$;
+          IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'trial_request_status') THEN
+            CREATE TYPE trial_request_status AS ENUM ('PENDING', 'ISSUED', 'REJECTED');
+          END IF;
+        END$$;
         """
     )
 
-    # PostgreSQL enum for status
+    # Usa il tipo esistente, senza tentare di ricrearlo
     trial_request_status = sa.Enum(
         "PENDING",
         "ISSUED",
         "REJECTED",
         name="trial_request_status",
+        create_type=False,
     )
 
     op.create_table(
@@ -67,19 +63,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Downgrade schema."""
     op.drop_index("ix_trial_requests_status", table_name="trial_requests")
     op.drop_index("ix_trial_requests_email", table_name="trial_requests")
     op.drop_table("trial_requests")
 
-    # Drop enum (safe)
-    op.execute(
-        """
-        DO $$
-        BEGIN
-            IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'trial_request_status') THEN
-                DROP TYPE trial_request_status;
-            END IF;
-        END $$;
-        """
-    )
+    # Non droppiamo forzatamente il TYPE in downgrade (potrebbe essere usato altrove)
+    # Se vuoi, possiamo aggiungere un drop condizionale più avanti.
