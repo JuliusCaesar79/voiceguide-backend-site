@@ -9,6 +9,9 @@ from models.admin import Admin
 from schemas.admin import AdminLogin, AdminOut
 from app.security import create_access_token, decode_access_token
 
+# ✅ bcrypt verify (no passlib)
+from app.passwords import verify_password
+
 router = APIRouter(prefix="/admin", tags=["Admin Auth"])
 
 # Schema di sicurezza HTTP Bearer per gli admin
@@ -36,8 +39,8 @@ def admin_login(payload: AdminLogin, db: Session = Depends(get_db)):
             detail="Credenziali admin non valide (email).",
         )
 
-    # Per ora confronto diretto, senza hashing.
-    if payload.password != admin.hashed_password:
+    # ✅ verifica corretta: password in chiaro vs hash bcrypt
+    if not verify_password(payload.password, admin.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenziali admin non valide (password).",
