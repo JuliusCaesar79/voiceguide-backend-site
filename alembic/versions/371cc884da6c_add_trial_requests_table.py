@@ -8,32 +8,43 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
+
+# revision identifiers, used by Alembic.
 revision: str = "371cc884da6c"
 down_revision: Union[str, Sequence[str], None] = "eaa684c0bbd7"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def upgrade() -> None:
-    # ✅ SUPER ROBUST: crea il tipo solo se NON esiste
-    op.execute(
-        """
-        DO $$
-        BEGIN
-          IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'trial_request_status') THEN
-            CREATE TYPE trial_request_status AS ENUM ('PENDING', 'ISSUED', 'REJECTED');
-          END IF;
-        END$$;
-        """
-    )
+ENUM_NAME = "trial_request_status"
+ENUM_VALUES = ("PENDING", "ISSUED", "REJECTED")
 
-    # Usa il tipo esistente, senza tentare di ricrearlo
+
+def upgrade() -> None:
+    bind = op.get_bind()
+    insp = inspect(bind)
+
+    # 1) Create enum type ONLY if it does not exist (idempotent)
+    op.execute(f"""
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '{ENUM_NAME}') THEN
+            CREATE TYPE {ENUM_NAME} AS ENUM ('{ENUM_VALUES[0]}','{ENUM_VALUES[1]}','{ENUM_VALUES[2]}');
+        END IF;
+    END$$;
+    """)
+
+    # 2) If table already exists, stop here (idempotent)
+    tables = set(insp.get_table_names(schema="public"))
+    if "trial_requests" in tables:
+        return
+
+    # IMPORTANT: create_type=False prevents SQLAlchemy from trying CREATE TYPE again
     trial_request_status = sa.Enum(
-        "PENDING",
-        "ISSUED",
-        "REJECTED",
-        name="trial_request_status",
+        *ENUM_VALUES,
+        name=ENUM_NAME,
         create_type=False,
     )
 
@@ -63,9 +74,21 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_trial_requests_status", table_name="trial_requests")
-    op.drop_index("ix_trial_requests_email", table_name="trial_requests")
-    op.drop_table("trial_requests")
+    bind = op.get_bind()
+    insp = inspect(bind)
 
-    # Non droppiamo forzatamente il TYPE in downgrade (potrebbe essere usato altrove)
-    # Se vuoi, possiamo aggiungere un drop condizionale più avanti.
+    tables = set(insp.get_table_names(schema="public"))
+    if "trial_requests" in tables:
+        op.drop_index("ix_trial_requests_status", table_name="trial_requests")
+        op.drop_index("ix_trial_requests_email", table_name="trial_requests")
+        op.drop_table("trial_requests")
+
+    # Drop enum type ONLY if exists (idempotent)
+    op.execute(f"""
+    DO $$
+    BEGIN
+        IF EXISTS (SELECT 1 FROM pg_type WHERE typname = '{ENUM_NAME}') THEN
+            DROP TYPE {ENUM_NAME};
+        END IF;
+    END$$;
+    """)
