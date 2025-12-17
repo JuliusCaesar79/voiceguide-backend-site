@@ -9,6 +9,7 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -45,8 +46,8 @@ def upgrade() -> None:
     if TABLE_NAME in tables:
         return
 
-    # IMPORTANT: create_type=False prevents SQLAlchemy from trying CREATE TYPE again
-    trial_request_status = sa.Enum(
+    # ✅ Use postgresql.ENUM to avoid implicit CREATE TYPE during table creation
+    trial_request_status = postgresql.ENUM(
         *ENUM_VALUES,
         name=ENUM_NAME,
         create_type=False,
