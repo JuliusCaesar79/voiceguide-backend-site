@@ -8,7 +8,9 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 from sqlalchemy.dialects import postgresql
+
 
 # revision identifiers, used by Alembic.
 revision: str = "bd7190d4db68"
@@ -17,41 +19,69 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def upgrade() -> None:
-    # 1) updated_at
-    op.add_column(
-        "partner_requests",
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
-    )
+TABLE = "partner_requests"
+SCHEMA = "public"
 
-    # 2) email unique index (manteniamo l'index email come unique)
-    #    (se esiste già un index non-unique, lo rimpiazziamo)
-    op.drop_index("ix_partner_requests_email", table_name="partner_requests")
+
+def upgrade() -> None:
+    bind = op.get_bind()
+    insp = inspect(bind)
+
+    # ---- columns ----
+    cols = {c["name"] for c in insp.get_columns(TABLE, schema=SCHEMA)}
+
+    # 1) updated_at (add only if missing)
+    if "updated_at" not in cols:
+        op.add_column(
+            TABLE,
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("now()"),
+                nullable=False,
+            ),
+            schema=SCHEMA,
+        )
+
+    # 2) email unique index
+    indexes = {i["name"] for i in insp.get_indexes(TABLE, schema=SCHEMA)}
+    if "ix_partner_requests_email" in indexes:
+        op.drop_index("ix_partner_requests_email", table_name=TABLE, schema=SCHEMA)
+
     op.create_index(
         "ix_partner_requests_email",
-        "partner_requests",
+        TABLE,
         ["email"],
         unique=True,
+        schema=SCHEMA,
     )
 
-    # 3) rimozione vecchio campo legacy (se esiste nel DB)
-    #    Nota: se la tua tabella non ha partner_type, questo darà errore.
-    #    Se hai dubbi, lo rendiamo condizionale dopo con un check.
-    op.drop_column("partner_requests", "partner_type")
+    # 3) drop legacy partner_type only if exists
+    if "partner_type" in cols:
+        op.drop_column(TABLE, "partner_type", schema=SCHEMA)
 
-    # 4) Enum status: gestiamo rename in modo sicuro
-    #    Se nel DB esiste il vecchio enum "partnerrequeststatus", facciamo:
-    #    - rename type -> partner_request_status
-    #    - aggiorniamo la colonna a usare il nuovo nome
-    op.execute("ALTER TYPE partnerrequeststatus RENAME TO partner_request_status")
+    # ---- enum status rename (safe) ----
+    res = bind.execute(
+        sa.text(
+            """
+            SELECT typname
+            FROM pg_type
+            WHERE typname IN ('partnerrequeststatus', 'partner_request_status')
+            """
+        )
+    ).fetchall()
 
+    enum_names = {r[0] for r in res}
+
+    # rename enum only if old exists and new does not
+    if "partnerrequeststatus" in enum_names and "partner_request_status" not in enum_names:
+        op.execute(
+            "ALTER TYPE partnerrequeststatus RENAME TO partner_request_status"
+        )
+
+    # ensure column uses new enum name
     op.alter_column(
-        "partner_requests",
+        TABLE,
         "status",
         existing_type=postgresql.ENUM(
             "PENDING", "APPROVED", "REJECTED", name="partnerrequeststatus"
@@ -61,16 +91,38 @@ def upgrade() -> None:
         ),
         existing_nullable=False,
         server_default=sa.text("'PENDING'"),
+        schema=SCHEMA,
     )
 
 
 def downgrade() -> None:
-    # Revert enum name
-    op.execute("ALTER TYPE partner_request_status RENAME TO partnerrequeststatus")
+    bind = op.get_bind()
+    insp = inspect(bind)
 
-    # Revert status column
+    cols = {c["name"] for c in insp.get_columns(TABLE, schema=SCHEMA)}
+    indexes = {i["name"] for i in insp.get_indexes(TABLE, schema=SCHEMA)}
+
+    # revert enum name if needed
+    res = bind.execute(
+        sa.text(
+            """
+            SELECT typname
+            FROM pg_type
+            WHERE typname IN ('partnerrequeststatus', 'partner_request_status')
+            """
+        )
+    ).fetchall()
+
+    enum_names = {r[0] for r in res}
+
+    if "partner_request_status" in enum_names and "partnerrequeststatus" not in enum_names:
+        op.execute(
+            "ALTER TYPE partner_request_status RENAME TO partnerrequeststatus"
+        )
+
+    # revert status column
     op.alter_column(
-        "partner_requests",
+        TABLE,
         "status",
         existing_type=postgresql.ENUM(
             "PENDING", "APPROVED", "REJECTED", name="partner_request_status"
@@ -80,22 +132,29 @@ def downgrade() -> None:
         ),
         existing_nullable=False,
         server_default=sa.text("'PENDING'"),
+        schema=SCHEMA,
     )
 
-    # Re-add partner_type (legacy)
-    op.add_column(
-        "partner_requests",
-        sa.Column("partner_type", sa.String(length=255), nullable=True),
-    )
+    # re-add partner_type if missing
+    if "partner_type" not in cols:
+        op.add_column(
+            TABLE,
+            sa.Column("partner_type", sa.String(length=255), nullable=True),
+            schema=SCHEMA,
+        )
 
-    # Revert email index to non-unique
-    op.drop_index("ix_partner_requests_email", table_name="partner_requests")
+    # revert email index to non-unique
+    if "ix_partner_requests_email" in indexes:
+        op.drop_index("ix_partner_requests_email", table_name=TABLE, schema=SCHEMA)
+
     op.create_index(
         "ix_partner_requests_email",
-        "partner_requests",
+        TABLE,
         ["email"],
         unique=False,
+        schema=SCHEMA,
     )
 
-    # Drop updated_at
-    op.drop_column("partner_requests", "updated_at")
+    # drop updated_at if exists
+    if "updated_at" in cols:
+        op.drop_column(TABLE, "updated_at", schema=SCHEMA)
