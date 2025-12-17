@@ -20,6 +20,19 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
+
+    # ✅ Make enum creation safe on Postgres (idempotent)
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'trial_request_status') THEN
+                CREATE TYPE trial_request_status AS ENUM ('PENDING', 'ISSUED', 'REJECTED');
+            END IF;
+        END $$;
+        """
+    )
+
     # PostgreSQL enum for status
     trial_request_status = sa.Enum(
         "PENDING",
@@ -27,7 +40,6 @@ def upgrade() -> None:
         "REJECTED",
         name="trial_request_status",
     )
-    trial_request_status.create(op.get_bind(), checkfirst=True)
 
     op.create_table(
         "trial_requests",
@@ -60,10 +72,14 @@ def downgrade() -> None:
     op.drop_index("ix_trial_requests_email", table_name="trial_requests")
     op.drop_table("trial_requests")
 
-    trial_request_status = sa.Enum(
-        "PENDING",
-        "ISSUED",
-        "REJECTED",
-        name="trial_request_status",
+    # Drop enum (safe)
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'trial_request_status') THEN
+                DROP TYPE trial_request_status;
+            END IF;
+        END $$;
+        """
     )
-    trial_request_status.drop(op.get_bind(), checkfirst=True)
