@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+SQLAlchemy
+psycopg2-binary
+python-dotenv
+alembic
+pydantic
+pydantic[email]
+pydantic-settings
+python-jose
+
+# HTTP client per bridge Site → AirLink
+requests>=2.31.0
