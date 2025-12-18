@@ -15,7 +15,7 @@ python-jose
 
 # Password hashing (ADMIN AUTH)
 passlib[bcrypt]==1.7.4
-bcrypt==4.1.2
+bcrypt==4.0.1
 
 # HTTP client per bridge Site → AirLink
 requests>=2.31.0
