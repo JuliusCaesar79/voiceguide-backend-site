@@ -26,13 +26,60 @@ def _send_email(
     html_body: str | None = None,
 ) -> None:
     """
-    Invio email via SMTP.
+    Invio email.
+    Provider selezionabile via env:
+    - EMAIL_PROVIDER=resend  (consigliato in produzione)
+    - EMAIL_PROVIDER=smtp    (fallback)
     Se EMAIL_ENABLED != "1" non fa nulla (safe per dev).
     """
     enabled = _get_env("EMAIL_ENABLED", "0")
     if enabled != "1":
         return
 
+    provider = (_get_env("EMAIL_PROVIDER", "smtp") or "smtp").lower().strip()
+
+    # ------------------------
+    # RESEND (HTTP API)
+    # ------------------------
+    if provider == "resend":
+        import requests  # richiede 'requests' in requirements
+
+        api_key = _get_env("RESEND_API_KEY")
+        from_email = _get_env("FROM_EMAIL") or _get_env("SMTP_FROM")  # fallback
+        reply_to = _get_env("REPLY_TO_EMAIL") or _get_env("SMTP_REPLY_TO")
+
+        if not api_key or not from_email:
+            raise RuntimeError("RESEND_API_KEY / FROM_EMAIL mancanti nelle variabili d'ambiente.")
+
+        payload: dict = {
+            "from": from_email,
+            "to": [to_email],
+            "subject": subject,
+            "text": text_body,
+        }
+        if html_body:
+            payload["html"] = html_body
+        if reply_to:
+            payload["reply_to"] = reply_to
+
+        r = requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=15,
+        )
+
+        if r.status_code >= 300:
+            raise RuntimeError(f"Resend send failed: {r.status_code} {r.text}")
+
+        return
+
+    # ------------------------
+    # SMTP (fallback)
+    # ------------------------
     host = _get_env("SMTP_HOST")
     port = int(_get_env("SMTP_PORT", "587") or "587")
     user = _get_env("SMTP_USER")
