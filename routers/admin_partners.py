@@ -36,22 +36,54 @@ def normalize_tier(val: str | None) -> str:
     return v if v in TIER_DEFAULT_COMMISSION else "BASE"
 
 
+def parse_bool(val: str | None) -> Optional[bool]:
+    """
+    Parsing robusto per querystring:
+    true/false, 1/0, yes/no, y/n, on/off
+    Se val è None o vuota -> None
+    Se val è invalida -> None (non filtra)
+    """
+    if val is None:
+        return None
+    s = str(val).strip().lower()
+    if s == "":
+        return None
+    if s in ("true", "1", "yes", "y", "on"):
+        return True
+    if s in ("false", "0", "no", "n", "off"):
+        return False
+    return None
+
+
 # ---------------------------------------------------------
 # 1️⃣ LISTA COMPLETA PARTNER (SOLO ADMIN)
+#    + filtro robusto ?active=true/false
 # ---------------------------------------------------------
 @router.get("/", response_model=List[PartnerOut])
 def admin_list_partners(
-    active: Optional[bool] = Query(default=None, description="true/false per filtrare is_active"),
+    active: Optional[str] = Query(
+        default=None,
+        description="Filtra is_active: true/false (accetta anche 1/0, yes/no, on/off)",
+    ),
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
     """
     Restituisce la lista di tutti i partner registrati.
     Usato dalla pagina React /admin/partners.
+
+    Se passi ?active=true  -> solo is_active=True
+    Se passi ?active=false -> solo is_active=False
+    Se non passi active    -> tutti
     """
     q = db.query(Partner).order_by(Partner.created_at.desc())
-    if active is not None:
-        q = q.filter(Partner.is_active == active)
+
+    active_bool = parse_bool(active)
+    if active_bool is True:
+        q = q.filter(Partner.is_active.is_(True))
+    elif active_bool is False:
+        q = q.filter(Partner.is_active.is_(False))
+
     return q.all()
 
 
