@@ -8,43 +8,39 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
+
+# revision identifiers, used by Alembic.
 revision: str = "758431d85461"
 down_revision: Union[str, Sequence[str], None] = "d8df00fc4db5"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def _column_exists(table: str, column: str) -> bool:
-    bind = op.get_bind()
-    q = sa.text(
-        """
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = current_schema()
-          AND table_name = :t
-          AND column_name = :c
-        """
-    )
-    return bind.execute(q, {"t": table, "c": column}).first() is not None
-
-
 def upgrade() -> None:
     """
-    Legacy safety migration:
-    - if partner_requests.partner_type exists:
-        - set default 'BASE'
-        - make it nullable
-    - if it does NOT exist (newer schema), do nothing
+    Legacy safety migration.
+    If the table/column doesn't exist (fresh DB / new schema), do NOTHING.
     """
-    if not _column_exists("partner_requests", "partner_type"):
+    bind = op.get_bind()
+    insp = inspect(bind)
+
+    tables = set(insp.get_table_names(schema="public"))
+    if "partner_requests" not in tables:
         return
 
+    cols = {c["name"] for c in insp.get_columns("partner_requests", schema="public")}
+    if "partner_type" not in cols:
+        return
+
+    # 1) set DEFAULT BASE (legacy safety)
     op.execute(
         "ALTER TABLE partner_requests "
         "ALTER COLUMN partner_type SET DEFAULT 'BASE'"
     )
 
+    # 2) make nullable
     op.alter_column(
         "partner_requests",
         "partner_type",
@@ -55,7 +51,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if not _column_exists("partner_requests", "partner_type"):
+    bind = op.get_bind()
+    insp = inspect(bind)
+
+    tables = set(insp.get_table_names(schema="public"))
+    if "partner_requests" not in tables:
+        return
+
+    cols = {c["name"] for c in insp.get_columns("partner_requests", schema="public")}
+    if "partner_type" not in cols:
         return
 
     op.alter_column(
