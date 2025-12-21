@@ -4,6 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -36,7 +37,13 @@ def _tier_from_organization(org: Optional[str]) -> str:
     # euristiche: personalizzabili
     if "elite" in v or "enterprise" in v:
         return "ELITE"
-    if "pro" in v or "agen" in v or "agency" in v or "tour operator" in v or v in {"to", "tour"}:
+    if (
+        "pro" in v
+        or "agen" in v
+        or "agency" in v
+        or "tour operator" in v
+        or v in {"to", "tour"}
+    ):
         return "PRO"
 
     return "BASE"
@@ -99,7 +106,7 @@ def create_partner_request(payload: dict, db: Session = Depends(get_db)):
     if not email:
         raise HTTPException(status_code=422, detail="Missing field: email")
 
-    # Anti-duplicati: stessa email con richiesta ancora PENDING
+    # Anti-duplicati applicativo (se già pending)
     existing = (
         db.query(PartnerRequest)
         .filter(
@@ -110,19 +117,29 @@ def create_partner_request(payload: dict, db: Session = Depends(get_db)):
     )
     if existing:
         raise HTTPException(
-            status_code=400,
+            status_code=409,
             detail="A request for this email is already pending.",
         )
 
     req = PartnerRequest(
         name=name,
         email=email,
-        partner_tier=partner_tier,  # <-- DB ENUM partner_tier (string coerente col DB)
+        partner_tier=partner_tier,  # string coerente col DB ENUM
         notes=notes,
         status=PartnerRequestStatus.PENDING,
     )
 
     db.add(req)
-    db.commit()
+
+    # ✅ Gestione robusta del vincolo UNIQUE su email
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A request for this email already exists.",
+        )
+
     db.refresh(req)
     return req
