@@ -8,7 +8,11 @@ import logging
 
 from app.db import get_db
 
-from models.partner_requests import PartnerRequest, PartnerRequestStatus
+from models.partner_requests import (
+    PartnerRequest,
+    PartnerRequestStatus,
+    PartnerTier,
+)
 from models.partners import Partner
 
 from schemas.partner_requests import PartnerRequestOut
@@ -103,13 +107,15 @@ def reject_partner_request(request_id: int, db: Session = Depends(get_db)):
 @router.post("/{request_id}/approve", response_model=PartnerRequestOut)
 def approve_partner_request(
     request_id: int,
+    tier: str | None = Query(default=None),
     commission_pct: Decimal | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
     """
     Approva la richiesta e crea un Partner attivo con referral_code.
 
-    - Default: commissione derivata dal partner_tier (BASE 10 / PRO 15 / ELITE 20)
+    - tier (query): BASE/PRO/ELITE (se passato, ha priorità sul tier salvato nella request)
+    - Default: commissione derivata dal tier (BASE 10 / PRO 15 / ELITE 20)
     - Override: passando commission_pct in query
     """
     req = db.query(PartnerRequest).filter(PartnerRequest.id == request_id).first()
@@ -119,10 +125,15 @@ def approve_partner_request(
     if req.status != PartnerRequestStatus.PENDING:
         raise HTTPException(status_code=400, detail="Request is not PENDING.")
 
-    # ---- commissione di default dal tier ----
-    tier_str = normalize_tier(req.partner_tier)
-    default_comm = TIER_DEFAULT_COMMISSION[tier_str]
+    # ---- tier scelto dall'admin (se presente) ----
+    chosen_tier = normalize_tier(tier) if tier else normalize_tier(req.partner_tier)
 
+    # Salva il tier scelto sulla request (tracciamento definitivo)
+    # partner_tier è Enum PartnerTier: settiamo in modo corretto
+    req.partner_tier = PartnerTier[chosen_tier]
+
+    # ---- commissione di default dal tier ----
+    default_comm = TIER_DEFAULT_COMMISSION[chosen_tier]
     final_commission = commission_pct if commission_pct is not None else default_comm
 
     # safety clamp (0-100)
@@ -160,7 +171,7 @@ def approve_partner_request(
             partner_name=req.name,
             referral_code=code,
             commission_pct=str(final_commission),
-            tier=str(tier_str),
+            tier=str(chosen_tier),
         )
     except Exception as e:
         logger.warning(

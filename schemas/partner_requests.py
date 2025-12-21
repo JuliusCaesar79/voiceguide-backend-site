@@ -32,9 +32,10 @@ class PartnerRequestOut(BaseModel):
     name: str
     email: EmailStr
     partner_tier: PartnerTier
-    notes: Optional[str]
+    notes: Optional[str] = None
     status: PartnerRequestStatus
     created_at: datetime
+    updated_at: datetime  # ✅ aggiunto (esiste nel model)
 
     class Config:
         from_attributes = True

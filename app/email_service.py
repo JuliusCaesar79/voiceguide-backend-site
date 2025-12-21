@@ -247,6 +247,138 @@ def send_partner_request_rejected_email(
 
 
 # -------------------------------------------------
+# PARTNER ADMIN EMAILS (TIER CHANGE / COLLAB CLOSE) - ENGLISH
+# -------------------------------------------------
+def send_partner_tier_changed_email(
+    to_email: str,
+    partner_name: str | None = None,
+    old_tier: str | None = None,
+    new_tier: str | None = None,
+    commission_pct: str | None = None,
+) -> None:
+    """
+    Email inviata quando un admin cambia il tier del partner (promozione/declassamento).
+    """
+    name = (partner_name or "Partner").strip()
+    safe_name = escape(name)
+    safe_old = escape(str(old_tier or ""))
+    safe_new = escape(str(new_tier or ""))
+    safe_comm = escape(str(commission_pct or ""))
+
+    subject = "VoiceGuide — Partner Tier Updated"
+
+    # TEXT (EN)
+    lines = [
+        f"Hello {name},",
+        "",
+        "Your VoiceGuide Partner tier has been updated by our admin team.",
+        "",
+    ]
+    if old_tier and new_tier:
+        lines.append(f"Tier: {old_tier} → {new_tier}")
+    elif new_tier:
+        lines.append(f"New tier: {new_tier}")
+    if commission_pct:
+        lines.append(f"Commission: {commission_pct}%")
+    lines += [
+        "",
+        "If you have any questions, simply reply to this email.",
+        "",
+        "Best regards,",
+        "VoiceGuide Team",
+    ]
+    text_body = "\n".join(lines)
+
+    # HTML (EN)
+    html_body = f"""
+    <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
+      <p>Hello <b>{safe_name}</b>,</p>
+
+      <p>Your <b>VoiceGuide Partner</b> tier has been updated by our admin team.</p>
+
+      <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
+        <div style="font-size:12px;color:#666;margin-bottom:6px;">Update details</div>
+        <div style="font-size:14px;">
+          {"<b>Tier:</b> " + safe_old + " → " + safe_new + "<br/>" if (old_tier and new_tier) else ""}
+          {"<b>New tier:</b> " + safe_new + "<br/>" if (new_tier and not old_tier) else ""}
+          {"<b>Commission:</b> " + safe_comm + "%<br/>" if commission_pct else ""}
+        </div>
+      </div>
+
+      <p>If you have any questions, simply reply to this email.</p>
+
+      <p style="margin-top:18px;color:#444;">Best regards,<br/><b>VoiceGuide Team</b></p>
+    </div>
+    """.strip()
+
+    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
+
+
+def send_partner_collaboration_closed_email(
+    to_email: str,
+    partner_name: str | None = None,
+    reason: str | None = None,
+) -> None:
+    """
+    Email inviata quando un admin disattiva un partner (chiusura collaborazione).
+    """
+    name = (partner_name or "Partner").strip()
+    safe_name = escape(name)
+    safe_reason = escape(reason.strip()) if reason else ""
+
+    subject = "VoiceGuide — Collaboration Update"
+
+    # TEXT (EN)
+    lines = [
+        f"Hello {name},",
+        "",
+        "This is a notification regarding your VoiceGuide Partner collaboration.",
+        "",
+        "Your collaboration has been set to inactive by our admin team.",
+    ]
+    if reason and reason.strip():
+        lines += ["", f"Reason: {reason.strip()}"]
+    lines += [
+        "",
+        "If you believe this is a mistake or you need further details, simply reply to this email.",
+        "",
+        "Kind regards,",
+        "VoiceGuide Team",
+    ]
+    text_body = "\n".join(lines)
+
+    # HTML (EN)
+    reason_html = ""
+    if safe_reason:
+        reason_html = f"""
+        <div style="margin-top:10px;padding:12px;border-radius:10px;background:#fafafa;border:1px solid #eaeaea;">
+          <div style="font-size:12px;color:#666;margin-bottom:6px;">Reason</div>
+          <div style="font-size:14px;color:#111;">{safe_reason}</div>
+        </div>
+        """.strip()
+
+    html_body = f"""
+    <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
+      <p>Hello <b>{safe_name}</b>,</p>
+
+      <p>This is a notification regarding your <b>VoiceGuide Partner</b> collaboration.</p>
+
+      <p>Your collaboration has been set to <b>inactive</b> by our admin team.</p>
+
+      {reason_html}
+
+      <p style="margin-top:14px;">
+        If you believe this is a mistake or you need further details, simply reply to this email.
+      </p>
+
+      <p style="margin-top:18px;color:#444;">Kind regards,<br/><b>VoiceGuide Team</b></p>
+    </div>
+    """.strip()
+
+    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
+
+
+# -------------------------------------------------
 # TRIAL / MANUAL LICENSE EMAIL - ENGLISH
 # -------------------------------------------------
 def send_trial_license_email(

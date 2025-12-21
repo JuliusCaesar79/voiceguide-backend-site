@@ -1,8 +1,10 @@
 # routers/admin_partners.py
 
-from typing import List
+from typing import List, Optional
+from decimal import Decimal
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -15,11 +17,31 @@ router = APIRouter(
     tags=["Admin Partners"],
 )
 
+logger = logging.getLogger(__name__)
+
+# -------------------------------------------------
+# TIER → COMMISSION DEFAULT
+# -------------------------------------------------
+TIER_DEFAULT_COMMISSION: dict[str, Decimal] = {
+    "BASE": Decimal("10.0"),
+    "PRO": Decimal("15.0"),
+    "ELITE": Decimal("20.0"),
+}
+
+
+def normalize_tier(val: str | None) -> str:
+    if not val:
+        return "BASE"
+    v = str(val).strip().upper()
+    return v if v in TIER_DEFAULT_COMMISSION else "BASE"
+
+
 # ---------------------------------------------------------
 # 1️⃣ LISTA COMPLETA PARTNER (SOLO ADMIN)
 # ---------------------------------------------------------
 @router.get("/", response_model=List[PartnerOut])
 def admin_list_partners(
+    active: Optional[bool] = Query(default=None, description="true/false per filtrare is_active"),
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
@@ -27,12 +49,10 @@ def admin_list_partners(
     Restituisce la lista di tutti i partner registrati.
     Usato dalla pagina React /admin/partners.
     """
-    partners = (
-        db.query(Partner)
-        .order_by(Partner.created_at.desc())
-        .all()
-    )
-    return partners
+    q = db.query(Partner).order_by(Partner.created_at.desc())
+    if active is not None:
+        q = q.filter(Partner.is_active == active)
+    return q.all()
 
 
 # ---------------------------------------------------------
@@ -77,21 +97,14 @@ def admin_create_partner(
         raise HTTPException(status_code=400, detail="Email già registrata come partner.")
 
     # Controllo referral duplicato
-    existing_ref = (
-        db.query(Partner)
-        .filter(Partner.referral_code == payload.referral_code)
-        .first()
-    )
+    existing_ref = db.query(Partner).filter(Partner.referral_code == payload.referral_code).first()
     if existing_ref:
-        raise HTTPException(
-            status_code=400,
-            detail="Referral code già in uso.",
-        )
+        raise HTTPException(status_code=400, detail="Referral code già in uso.")
 
     # Conversione partner type (BASE, PRO, ELITE)
     try:
         partner_type = PartnerType(payload.partner_type.upper())
-    except ValueError:
+    except Exception:
         raise HTTPException(
             status_code=400,
             detail="partner_type deve essere BASE, PRO o ELITE.",
@@ -112,3 +125,116 @@ def admin_create_partner(
     db.refresh(partner)
 
     return partner
+
+
+# ---------------------------------------------------------
+# 4️⃣ PROMUOVI / DECLASSA PARTNER (SOLO ADMIN)
+# ---------------------------------------------------------
+@router.patch("/{partner_id}/tier", response_model=PartnerOut)
+def admin_set_partner_tier(
+    partner_id: int,
+    tier: str = Query(..., description="BASE|PRO|ELITE"),
+    commission_pct: Decimal | None = Query(default=None, description="Override 0-100 (opzionale)"),
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    """
+    Aggiorna il tier del partner e (di default) aggiorna anche la commissione:
+    BASE 10% / PRO 15% / ELITE 20%
+    Se commission_pct è passato, fa override.
+    """
+    partner = db.query(Partner).filter(Partner.id == partner_id).first()
+    if not partner:
+        raise HTTPException(status_code=404, detail="Partner non trovato.")
+
+    chosen_tier = normalize_tier(tier)
+    default_comm = TIER_DEFAULT_COMMISSION[chosen_tier]
+    final_comm = commission_pct if commission_pct is not None else default_comm
+
+    if final_comm < Decimal("0") or final_comm > Decimal("100"):
+        raise HTTPException(status_code=400, detail="commission_pct deve essere tra 0 e 100.")
+
+    old_tier = partner.partner_type.value if hasattr(partner.partner_type, "value") else str(partner.partner_type)
+
+    partner.partner_type = PartnerType(chosen_tier)
+    partner.commission_pct = final_comm
+
+    db.add(partner)
+    db.commit()
+    db.refresh(partner)
+
+    # Email (non bloccante) - safe import
+    try:
+        from app.email_service import send_partner_tier_changed_email  # opzionale
+        send_partner_tier_changed_email(
+            to_email=partner.email,
+            partner_name=partner.name,
+            old_tier=old_tier,
+            new_tier=chosen_tier,
+            commission_pct=str(final_comm),
+        )
+    except Exception as e:
+        logger.warning("Email tier change fallita partner_id=%s: %s", partner_id, str(e))
+
+    return partner
+
+
+# ---------------------------------------------------------
+# 5️⃣ ATTIVA / DISATTIVA COLLABORAZIONE (SOLO ADMIN)
+# ---------------------------------------------------------
+@router.patch("/{partner_id}/active", response_model=PartnerOut)
+def admin_set_partner_active(
+    partner_id: int,
+    is_active: bool = Query(...),
+    reason: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    """
+    Attiva/disattiva un partner (soft).
+    Consigliato rispetto al delete perché mantiene storico ordini/payout.
+    """
+    partner = db.query(Partner).filter(Partner.id == partner_id).first()
+    if not partner:
+        raise HTTPException(status_code=404, detail="Partner non trovato.")
+
+    partner.is_active = bool(is_active)
+    db.add(partner)
+    db.commit()
+    db.refresh(partner)
+
+    # Email (non bloccante) - solo se disattiviamo
+    if not is_active:
+        try:
+            from app.email_service import send_partner_collaboration_closed_email  # opzionale
+            send_partner_collaboration_closed_email(
+                to_email=partner.email,
+                partner_name=partner.name,
+                reason=reason or "",
+            )
+        except Exception as e:
+            logger.warning("Email chiusura collaborazione fallita partner_id=%s: %s", partner_id, str(e))
+
+    return partner
+
+
+# ---------------------------------------------------------
+# 6️⃣ DELETE PARTNER (SOLO ADMIN) - USARE CON CAUTELA
+# ---------------------------------------------------------
+@router.delete("/{partner_id}")
+def admin_delete_partner(
+    partner_id: int,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    """
+    Elimina definitivamente un partner.
+    ⚠️ Se hai FK su ordini/payout, meglio usare /active?is_active=false.
+    """
+    partner = db.query(Partner).filter(Partner.id == partner_id).first()
+    if not partner:
+        raise HTTPException(status_code=404, detail="Partner non trovato.")
+
+    db.delete(partner)
+    db.commit()
+    return {"ok": True}
