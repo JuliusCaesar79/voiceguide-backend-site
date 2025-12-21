@@ -1,6 +1,9 @@
 # routers/partner_requests.py
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -10,13 +13,97 @@ from schemas.partner_requests import PartnerRequestCreate, PartnerRequestOut
 router = APIRouter(prefix="/partner-requests", tags=["Partner Requests"])
 
 
+# ---------------------------------------------------------
+# ✅ Payload "pubblico" dal sito (Vercel)
+# ---------------------------------------------------------
+class PartnerRequestPublicIn(BaseModel):
+    name: str
+    email: EmailStr
+    organization: Optional[str] = None
+    message: Optional[str] = None
+
+
+def _tier_from_organization(org: Optional[str]) -> str:
+    """
+    Converte una stringa 'organization' in un tier valido per DB.
+    Se non riconosciamo, mettiamo BASE.
+    """
+    if not org:
+        return "BASE"
+
+    v = org.strip().lower()
+
+    # euristiche: personalizzabili
+    if "elite" in v or "enterprise" in v:
+        return "ELITE"
+    if "pro" in v or "agen" in v or "agency" in v or "tour operator" in v or v in {"to", "tour"}:
+        return "PRO"
+
+    return "BASE"
+
+
+# ---------------------------------------------------------
+# POST /partner-requests
+# Accetta sia:
+# - PartnerRequestCreate (interno)
+# - PartnerRequestPublicIn (sito)
+# ---------------------------------------------------------
 @router.post("", response_model=PartnerRequestOut)
-def create_partner_request(payload: PartnerRequestCreate, db: Session = Depends(get_db)):
+def create_partner_request(payload: dict, db: Session = Depends(get_db)):
+    """
+    ⚠️ Riceviamo dict per supportare 2 shape diverse.
+    Poi proviamo a validare:
+    1) schema interno PartnerRequestCreate
+    2) schema pubblico PartnerRequestPublicIn
+    """
+    parsed_internal: Optional[PartnerRequestCreate] = None
+    parsed_public: Optional[PartnerRequestPublicIn] = None
+
+    # 1) Prova schema interno (quello che già usavi)
+    try:
+        parsed_internal = PartnerRequestCreate.model_validate(payload)
+    except Exception:
+        parsed_internal = None
+
+    # 2) Prova schema pubblico (sito)
+    if parsed_internal is None:
+        try:
+            parsed_public = PartnerRequestPublicIn.model_validate(payload)
+        except Exception:
+            parsed_public = None
+
+    if parsed_internal is None and parsed_public is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid payload. Expected PartnerRequestCreate or public partner form payload.",
+        )
+
+    # Normalizziamo campi comuni
+    if parsed_internal:
+        name = parsed_internal.name.strip()
+        email = str(parsed_internal.email).lower().strip()
+        partner_tier = parsed_internal.partner_tier.value  # enum -> string
+        notes = parsed_internal.notes.strip() if parsed_internal.notes else None
+    else:
+        name = parsed_public.name.strip()
+        email = str(parsed_public.email).lower().strip()
+
+        # organization -> partner_tier
+        partner_tier = _tier_from_organization(parsed_public.organization)
+
+        # message -> notes
+        notes = parsed_public.message.strip() if parsed_public.message else None
+
+    if not name:
+        raise HTTPException(status_code=422, detail="Missing field: name")
+    if not email:
+        raise HTTPException(status_code=422, detail="Missing field: email")
+
     # Anti-duplicati: stessa email con richiesta ancora PENDING
     existing = (
         db.query(PartnerRequest)
         .filter(
-            PartnerRequest.email == str(payload.email).lower().strip(),
+            PartnerRequest.email == email,
             PartnerRequest.status == PartnerRequestStatus.PENDING,
         )
         .first()
@@ -28,10 +115,10 @@ def create_partner_request(payload: PartnerRequestCreate, db: Session = Depends(
         )
 
     req = PartnerRequest(
-        name=payload.name.strip(),
-        email=str(payload.email).lower().strip(),
-        partner_tier=payload.partner_tier.value,  # <-- DB ENUM partner_tier
-        notes=(payload.notes.strip() if payload.notes else None),
+        name=name,
+        email=email,
+        partner_tier=partner_tier,  # <-- DB ENUM partner_tier (string coerente col DB)
+        notes=notes,
         status=PartnerRequestStatus.PENDING,
     )
 
