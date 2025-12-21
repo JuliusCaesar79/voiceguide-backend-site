@@ -33,26 +33,29 @@ app = FastAPI(
 # Può essere sovrascritto via ENV CORS_ORIGINS
 cors_env = os.getenv(
     "CORS_ORIGINS",
-    ",".join([
-        # DEV
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-
-        # WEBAPP ADMIN / PARTNER
-        "https://voiceguide-admin-production.up.railway.app",
-        "https://voiceguide-partner-production.up.railway.app",
-
-        # 🌍 SITO PUBBLICO
-        "https://www.voiceguideapp.com",
-        "https://voiceguideapp.com",
-    ])
+    ",".join(
+        [
+            # DEV
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            # WEBAPP ADMIN / PARTNER
+            "https://voiceguide-admin-production.up.railway.app",
+            "https://voiceguide-partner-production.up.railway.app",
+            # 🌍 SITO PUBBLICO
+            "https://www.voiceguideapp.com",
+            "https://voiceguideapp.com",
+        ]
+    ),
 )
 
 origins = [o.strip() for o in cors_env.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
+    # Lista esplicita (utile per dev + webapp)
     allow_origins=origins,
+    # Regex "anti-problemi" per il sito pubblico (www / non-www)
+    allow_origin_regex=r"^https://(www\.)?voiceguideapp\.com$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -94,6 +97,7 @@ app.include_router(partner_requests.router)
 @app.get("/")
 def root():
     return {"message": "Backend VoiceGuide Sito attivo e pronto!"}
+
 
 @app.get("/health")
 def health():
