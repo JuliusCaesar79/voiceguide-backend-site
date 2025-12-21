@@ -6,6 +6,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.db import get_db
 from routers.auth_admin import get_current_admin
@@ -37,12 +38,6 @@ def normalize_tier(val: str | None) -> str:
 
 
 def parse_bool(val: str | None) -> Optional[bool]:
-    """
-    Parsing robusto per querystring:
-    true/false, 1/0, yes/no, y/n, on/off
-    Se val è None o vuota -> None
-    Se val è invalida -> None (non filtra)
-    """
     if val is None:
         return None
     s = str(val).strip().lower()
@@ -56,25 +51,43 @@ def parse_bool(val: str | None) -> Optional[bool]:
 
 
 # ---------------------------------------------------------
-# 1️⃣ LISTA COMPLETA PARTNER (SOLO ADMIN)
-#    + filtro robusto ?active=true/false
+# ✅ NEW: COUNT PARTNER (SOLO ADMIN)
 # ---------------------------------------------------------
-@router.get("/", response_model=List[PartnerOut])
-def admin_list_partners(
-    active: Optional[str] = Query(
-        default=None,
-        description="Filtra is_active: true/false (accetta anche 1/0, yes/no, on/off)",
-    ),
+@router.get("/count")
+def admin_count_partners(
+    active: Optional[str] = Query(default=None, description="true/false (anche 1/0, yes/no)"),
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
     """
-    Restituisce la lista di tutti i partner registrati.
-    Usato dalla pagina React /admin/partners.
+    Ritorna un conteggio stabile (COUNT(*) sul DB).
+    Se active=true  -> count is_active=True
+    Se active=false -> count is_active=False
+    Se active assente -> count totale
+    """
+    q = db.query(func.count(Partner.id))
 
-    Se passi ?active=true  -> solo is_active=True
-    Se passi ?active=false -> solo is_active=False
-    Se non passi active    -> tutti
+    active_bool = parse_bool(active)
+    if active_bool is True:
+        q = q.filter(Partner.is_active.is_(True))
+    elif active_bool is False:
+        q = q.filter(Partner.is_active.is_(False))
+
+    count = q.scalar() or 0
+    return {"count": int(count)}
+
+
+# ---------------------------------------------------------
+# 1️⃣ LISTA COMPLETA PARTNER (SOLO ADMIN)
+# ---------------------------------------------------------
+@router.get("/", response_model=List[PartnerOut])
+def admin_list_partners(
+    active: Optional[str] = Query(default=None, description="true/false per filtrare is_active"),
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    """
+    Lista partner. (Lasciamo anche questo per la pagina /admin/partners)
     """
     q = db.query(Partner).order_by(Partner.created_at.desc())
 
@@ -96,10 +109,6 @@ def admin_get_partner_detail(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    """
-    Restituisce il dettaglio di un singolo partner.
-    Usato dalla pagina React /admin/partners/{id}.
-    """
     partner = db.query(Partner).filter(Partner.id == partner_id).first()
     if not partner:
         raise HTTPException(
@@ -118,22 +127,14 @@ def admin_create_partner(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    """
-    Crea un nuovo partner tramite pannello admin.
-    Stessa logica di /partners/create, ma protetta da login admin.
-    """
-
-    # Controllo email duplicata
     existing_email = db.query(Partner).filter(Partner.email == payload.email).first()
     if existing_email:
         raise HTTPException(status_code=400, detail="Email già registrata come partner.")
 
-    # Controllo referral duplicato
     existing_ref = db.query(Partner).filter(Partner.referral_code == payload.referral_code).first()
     if existing_ref:
         raise HTTPException(status_code=400, detail="Referral code già in uso.")
 
-    # Conversione partner type (BASE, PRO, ELITE)
     try:
         partner_type = PartnerType(payload.partner_type.upper())
     except Exception:
@@ -170,11 +171,6 @@ def admin_set_partner_tier(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    """
-    Aggiorna il tier del partner e (di default) aggiorna anche la commissione:
-    BASE 10% / PRO 15% / ELITE 20%
-    Se commission_pct è passato, fa override.
-    """
     partner = db.query(Partner).filter(Partner.id == partner_id).first()
     if not partner:
         raise HTTPException(status_code=404, detail="Partner non trovato.")
@@ -195,9 +191,8 @@ def admin_set_partner_tier(
     db.commit()
     db.refresh(partner)
 
-    # Email (non bloccante) - safe import
     try:
-        from app.email_service import send_partner_tier_changed_email  # opzionale
+        from app.email_service import send_partner_tier_changed_email
         send_partner_tier_changed_email(
             to_email=partner.email,
             partner_name=partner.name,
@@ -222,10 +217,6 @@ def admin_set_partner_active(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    """
-    Attiva/disattiva un partner (soft).
-    Consigliato rispetto al delete perché mantiene storico ordini/payout.
-    """
     partner = db.query(Partner).filter(Partner.id == partner_id).first()
     if not partner:
         raise HTTPException(status_code=404, detail="Partner non trovato.")
@@ -235,10 +226,9 @@ def admin_set_partner_active(
     db.commit()
     db.refresh(partner)
 
-    # Email (non bloccante) - solo se disattiviamo
     if not is_active:
         try:
-            from app.email_service import send_partner_collaboration_closed_email  # opzionale
+            from app.email_service import send_partner_collaboration_closed_email
             send_partner_collaboration_closed_email(
                 to_email=partner.email,
                 partner_name=partner.name,
@@ -259,10 +249,6 @@ def admin_delete_partner(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    """
-    Elimina definitivamente un partner.
-    ⚠️ Se hai FK su ordini/payout, meglio usare /active?is_active=false.
-    """
     partner = db.query(Partner).filter(Partner.id == partner_id).first()
     if not partner:
         raise HTTPException(status_code=404, detail="Partner non trovato.")
