@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 import os
 
 from dotenv import load_dotenv
@@ -30,36 +31,59 @@ app = FastAPI(
 # ----------------------------------------------------
 # 🌐 CORS CONFIG (DEV + PRODUZIONE)
 # ----------------------------------------------------
-# Può essere sovrascritto via ENV CORS_ORIGINS
-cors_env = os.getenv(
-    "CORS_ORIGINS",
-    ",".join(
-        [
-            # DEV
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            # WEBAPP ADMIN / PARTNER
-            "https://voiceguide-admin-production.up.railway.app",
-            "https://voiceguide-partner-production.up.railway.app",
-            # 🌍 SITO PUBBLICO
-            "https://www.voiceguideapp.com",
-            "https://voiceguideapp.com",
-        ]
-    ),
-)
+# ✅ Lista base "hard" (non dipende da ENV)
+base_origins = [
+    # DEV
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
 
-origins = [o.strip() for o in cors_env.split(",") if o.strip()]
+    # WEBAPP ADMIN / PARTNER
+    "https://voiceguide-admin-production.up.railway.app",
+    "https://voiceguide-partner-production.up.railway.app",
+
+    # 🌍 SITO PUBBLICO
+    "https://www.voiceguideapp.com",
+    "https://voiceguideapp.com",
+]
+
+# ✅ Se su Railway esiste CORS_ORIGINS, NON deve distruggere la base:
+# la uniamo alla lista base (merge).
+cors_env = os.getenv("CORS_ORIGINS", "").strip()
+env_origins = [o.strip() for o in cors_env.split(",") if o.strip()] if cors_env else []
+
+# merge + dedup
+origins = list(dict.fromkeys([*base_origins, *env_origins]))
 
 app.add_middleware(
     CORSMiddleware,
-    # Lista esplicita (utile per dev + webapp)
     allow_origins=origins,
-    # Regex "anti-problemi" per il sito pubblico (www / non-www)
-    allow_origin_regex=r"^https://(www\.)?voiceguideapp\.com$",
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# ----------------------------------------------------
+# 🛡️ OPTIONS CATCH-ALL (preflight "a prova di tutto")
+# ----------------------------------------------------
+# Questo elimina i casi in cui un proxy / router / setup causa 405 sul preflight.
+@app.options("/{path:path}", include_in_schema=False)
+async def options_handler(request: Request, path: str):
+    origin = request.headers.get("origin")
+
+    # Se l'origin è in allowlist, lo riecheggiamo (necessario con credentials).
+    # Altrimenti non lo mettiamo (così non "apriamo" tutto al mondo).
+    headers = {
+        "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+        "Access-Control-Allow-Headers": request.headers.get(
+            "access-control-request-headers", "Authorization,Content-Type"
+        ),
+        "Access-Control-Allow-Credentials": "true",
+        "Vary": "Origin",
+    }
+    if origin and origin in origins:
+        headers["Access-Control-Allow-Origin"] = origin
+
+    return Response(status_code=200, headers=headers)
 
 # ----------------------------------------------------
 # 🗄️ DB INIT (SOLO DEV)
@@ -97,7 +121,6 @@ app.include_router(partner_requests.router)
 @app.get("/")
 def root():
     return {"message": "Backend VoiceGuide Sito attivo e pronto!"}
-
 
 @app.get("/health")
 def health():
