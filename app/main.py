@@ -30,14 +30,21 @@ app = FastAPI(
 # ----------------------------------------------------
 # 🌐 CORS CONFIG (DEV + PRODUZIONE)
 # ----------------------------------------------------
-# Puoi gestirli via ENV oppure lasciarli hardcoded qui
+# Può essere sovrascritto via ENV CORS_ORIGINS
 cors_env = os.getenv(
     "CORS_ORIGINS",
     ",".join([
+        # DEV
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+
+        # WEBAPP ADMIN / PARTNER
         "https://voiceguide-admin-production.up.railway.app",
         "https://voiceguide-partner-production.up.railway.app",
+
+        # 🌍 SITO PUBBLICO
+        "https://www.voiceguideapp.com",
+        "https://voiceguideapp.com",
     ])
 )
 
