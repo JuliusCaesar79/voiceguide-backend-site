@@ -49,6 +49,27 @@ def _tier_from_organization(org: Optional[str]) -> str:
     return "BASE"
 
 
+def _extract_public_notes(payload: dict, parsed_public: PartnerRequestPublicIn) -> Optional[str]:
+    """
+    Estrae in modo robusto il messaggio del form pubblico.
+    Supporta più chiavi possibili (perché il sito potrebbe inviare nomi diversi).
+    """
+    raw_msg = (
+        parsed_public.message
+        or payload.get("notes")
+        or payload.get("messaggio")
+        or payload.get("msg")
+        or payload.get("text")
+        or payload.get("body")
+    )
+
+    if isinstance(raw_msg, str):
+        raw_msg = raw_msg.strip()
+        return raw_msg if raw_msg else None
+
+    return None
+
+
 # ---------------------------------------------------------
 # POST /partner-requests
 # Accetta sia:
@@ -98,8 +119,8 @@ def create_partner_request(payload: dict, db: Session = Depends(get_db)):
         # organization -> partner_tier
         partner_tier = _tier_from_organization(parsed_public.organization)
 
-        # message -> notes
-        notes = parsed_public.message.strip() if parsed_public.message else None
+        # message (o varianti) -> notes
+        notes = _extract_public_notes(payload, parsed_public)
 
     if not name:
         raise HTTPException(status_code=422, detail="Missing field: name")
