@@ -17,6 +17,7 @@ from routers import auth_admin, admin, payouts_admin, admin_partners
 from routers import partner_portal, partner_payments_admin, admin_licenses
 from routers import trial_requests, admin_trial_requests
 from routers import admin_partner_requests, partner_requests
+from routers import checkout
 
 # ----------------------------------------------------
 # 🚀 FASTAPI APP
@@ -86,6 +87,8 @@ app.include_router(admin_trial_requests.router)
 
 app.include_router(admin_partner_requests.router)
 app.include_router(partner_requests.router)
+
+app.include_router(checkout.router)
 
 # ----------------------------------------------------
 # 🏠 BASE
