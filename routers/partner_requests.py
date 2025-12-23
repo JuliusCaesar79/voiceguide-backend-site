@@ -49,52 +49,55 @@ def _tier_from_organization(org: Optional[str]) -> str:
     return "BASE"
 
 
-def _extract_public_notes(payload: dict, parsed_public: PartnerRequestPublicIn) -> Optional[str]:
+def _looks_like_public(payload: dict) -> bool:
     """
-    Estrae in modo robusto il messaggio del form pubblico.
-    Supporta più chiavi possibili (perché il sito potrebbe inviare nomi diversi).
+    Decide se il payload arriva dal sito (public form) o dal flusso interno.
+    Il problema che stai vedendo nasce quando il modello interno "accetta"
+    campi extra e quindi 'message' viene ignorato.
     """
-    raw_msg = (
-        parsed_public.message
-        or payload.get("notes")
-        or payload.get("messaggio")
-        or payload.get("msg")
-        or payload.get("text")
-        or payload.get("body")
-    )
-
-    if isinstance(raw_msg, str):
-        raw_msg = raw_msg.strip()
-        return raw_msg if raw_msg else None
-
-    return None
+    keys = set(payload.keys())
+    # se vedo organization/message, è quasi sicuramente il form del sito
+    if "organization" in keys or "message" in keys:
+        return True
+    # se NON vedo partner_tier/notes ma vedo name+email, trattalo come public
+    if ("partner_tier" not in keys and "notes" not in keys) and (
+        "name" in keys and "email" in keys
+    ):
+        return True
+    return False
 
 
 # ---------------------------------------------------------
 # POST /partner-requests
 # Accetta sia:
+# - PartnerRequestPublicIn (sito)  ✅ PRIORITÀ
 # - PartnerRequestCreate (interno)
-# - PartnerRequestPublicIn (sito)
 # ---------------------------------------------------------
 @router.post("", response_model=PartnerRequestOut)
 def create_partner_request(payload: dict, db: Session = Depends(get_db)):
     """
-    ⚠️ Riceviamo dict per supportare 2 shape diverse.
-    Poi proviamo a validare:
-    1) schema interno PartnerRequestCreate
-    2) schema pubblico PartnerRequestPublicIn
+    Riceviamo dict per supportare 2 shape diverse.
+    ✅ FIX: priorità al payload pubblico (per non perdere 'message').
     """
     parsed_internal: Optional[PartnerRequestCreate] = None
     parsed_public: Optional[PartnerRequestPublicIn] = None
 
-    # 1) Prova schema interno (quello che già usavi)
-    try:
-        parsed_internal = PartnerRequestCreate.model_validate(payload)
-    except Exception:
-        parsed_internal = None
+    # 1) Se sembra "public", valida prima come public
+    if _looks_like_public(payload):
+        try:
+            parsed_public = PartnerRequestPublicIn.model_validate(payload)
+        except Exception:
+            parsed_public = None
 
-    # 2) Prova schema pubblico (sito)
-    if parsed_internal is None:
+    # 2) Se non è public (o validazione fallita), prova interno
+    if parsed_public is None:
+        try:
+            parsed_internal = PartnerRequestCreate.model_validate(payload)
+        except Exception:
+            parsed_internal = None
+
+    # 3) Se ancora nulla, ultimo tentativo: prova public anche se non "sembra" public
+    if parsed_internal is None and parsed_public is None:
         try:
             parsed_public = PartnerRequestPublicIn.model_validate(payload)
         except Exception:
@@ -107,20 +110,20 @@ def create_partner_request(payload: dict, db: Session = Depends(get_db)):
         )
 
     # Normalizziamo campi comuni
-    if parsed_internal:
-        name = parsed_internal.name.strip()
-        email = str(parsed_internal.email).lower().strip()
-        partner_tier = parsed_internal.partner_tier.value  # enum -> string
-        notes = parsed_internal.notes.strip() if parsed_internal.notes else None
-    else:
+    if parsed_public is not None:
         name = parsed_public.name.strip()
         email = str(parsed_public.email).lower().strip()
 
         # organization -> partner_tier
         partner_tier = _tier_from_organization(parsed_public.organization)
 
-        # message (o varianti) -> notes
-        notes = _extract_public_notes(payload, parsed_public)
+        # message -> notes
+        notes = parsed_public.message.strip() if parsed_public.message else None
+    else:
+        name = parsed_internal.name.strip()
+        email = str(parsed_internal.email).lower().strip()
+        partner_tier = parsed_internal.partner_tier.value  # enum -> string
+        notes = parsed_internal.notes.strip() if parsed_internal.notes else None
 
     if not name:
         raise HTTPException(status_code=422, detail="Missing field: name")
