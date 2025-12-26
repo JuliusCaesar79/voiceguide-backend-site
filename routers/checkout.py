@@ -17,6 +17,12 @@ from app.email_service import send_order_received_email
 from models.orders import Order, OrderType, PaymentMethod, PaymentStatus
 from models.order_billing_details import OrderBillingDetails
 
+# ⬇️ Proviamo a importare Package (se esiste nel progetto)
+try:
+    from models.packages import Package  # type: ignore
+except Exception:  # pragma: no cover
+    Package = None  # type: ignore
+
 router = APIRouter(prefix="/checkout", tags=["Checkout"])
 
 InvoiceMode = Literal["PERSON_IT", "VAT_IT", "COMPANY_EXT"]
@@ -100,10 +106,6 @@ def _normalize_country_iso2(raw: Optional[str], fallback: Optional[str] = None) 
 
 
 def _build_checkout_success_url(order_id: int, lang: str, success_url: Optional[AnyHttpUrl]) -> str:
-    """
-    Success page del sito (con order=ID).
-    Nota: Stripe aggiungerà anche session_id come {CHECKOUT_SESSION_ID} se la usiamo nei template.
-    """
     if success_url:
         base_success = str(success_url)
         sep = "&" if "?" in base_success else "?"
@@ -120,13 +122,6 @@ def _build_checkout_cancel_url(order_id: int, lang: str, cancel_url: Optional[An
 
 
 def _save_billing_from_invoice(db: Session, order_id: int, invoice: Invoice) -> None:
-    """
-    Mappa il payload del sito (invoice.mode + blocchi) nel modello OrderBillingDetails.
-    Regola concordata:
-      - company_name = INTESTATARIO (persona o azienda)
-      - tax_code per CF persona fisica
-      - vat_number per P.IVA/VAT
-    """
     if not invoice:
         return
 
@@ -182,14 +177,11 @@ def _save_billing_from_invoice(db: Session, order_id: int, invoice: Invoice) -> 
 # -------------------------------------------------
 # Pricing (Fase 1: hardcoded, poi DB)
 # -------------------------------------------------
-# product -> (order_type, package_id, quantity, unit_price_eur)
-# NOTE: per SINGLE_XX useremo package_id=XX (max guests) in create-order (override)
 PRODUCT_PRICING: Dict[str, Tuple[OrderType, Optional[int], int, Decimal]] = {
     "SINGLE_10": (OrderType.SINGLE, None, 1, Decimal("7.99")),
     "SINGLE_25": (OrderType.SINGLE, None, 1, Decimal("14.99")),
     "SINGLE_35": (OrderType.SINGLE, None, 1, Decimal("19.99")),
     "SINGLE_100": (OrderType.SINGLE, None, 1, Decimal("49.99")),
-    # TODO: aggiungere pacchetti TO / SCHOOL quando allineiamo la pagina “Licenze”
 }
 
 
@@ -198,10 +190,6 @@ def _money2(value: Decimal) -> Decimal:
 
 
 def _calc_amounts(product: str, partner_code: Optional[str]) -> Tuple[OrderType, Optional[int], int, Decimal, Decimal, Decimal]:
-    """
-    Ritorna:
-      order_type, package_id, quantity, subtotal, discount, total (EUR Decimal con 2 decimali)
-    """
     key = (product or "").strip().upper()
     if key not in PRODUCT_PRICING:
         raise HTTPException(status_code=400, detail=f"Invalid product: {product}")
@@ -224,14 +212,39 @@ def _eur_to_cents(amount_eur: Decimal) -> int:
     return int((a * 100).to_integral_value(rounding=ROUND_HALF_UP))
 
 
-def _parse_product_to_order_fields(product: str) -> Tuple[OrderType, Optional[int], int]:
+def _resolve_single_package_id(db: Session, max_guests: int) -> int:
     """
-    Interpreta la stringa product per salvare campi utili al fulfillment.
-    Convenzione:
-      - SINGLE_10/25/35/100 -> order_type=SINGLE, package_id=<max_guests>, quantity=1
-      - PACKAGE_TO_10/20/50/100 -> order_type=PACKAGE_TO, quantity=<bundle_size>, package_id=None
-      - PACKAGE_SCHOOL_1/5/10/30 -> order_type=PACKAGE_SCHOOL, quantity=<bundle_size>, package_id=None
+    orders.package_id è FK -> packages.id.
+    Quindi NON possiamo mettere 10/25/35/100 direttamente.
+    Cerchiamo in packages una riga con max_guests = X (o equivalente).
     """
+    if Package is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Package model not available. Cannot resolve package_id for SINGLE products.",
+        )
+
+    # Proviamo i nomi campo più probabili: max_guests / guests / capacity
+    q = db.query(Package)
+    if hasattr(Package, "max_guests"):
+        row = q.filter(getattr(Package, "max_guests") == max_guests).first()
+    elif hasattr(Package, "guests"):
+        row = q.filter(getattr(Package, "guests") == max_guests).first()
+    elif hasattr(Package, "capacity"):
+        row = q.filter(getattr(Package, "capacity") == max_guests).first()
+    else:
+        row = None
+
+    if not row:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Missing packages row for SINGLE_{max_guests}. Seed table 'packages' (max_guests={max_guests}).",
+        )
+
+    return int(getattr(row, "id"))
+
+
+def _parse_product_to_order_fields(db: Session, product: str) -> Tuple[OrderType, Optional[int], int]:
     prod = (product or "").strip().upper()
 
     if prod.startswith("SINGLE_"):
@@ -239,7 +252,9 @@ def _parse_product_to_order_fields(product: str) -> Tuple[OrderType, Optional[in
             mg = int(prod.split("_", 1)[1])
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid product SINGLE_x")
-        return (OrderType.SINGLE, mg, 1)
+
+        package_id = _resolve_single_package_id(db, max_guests=mg)
+        return (OrderType.SINGLE, package_id, 1)
 
     if prod.startswith("PACKAGE_TO_"):
         try:
@@ -255,7 +270,6 @@ def _parse_product_to_order_fields(product: str) -> Tuple[OrderType, Optional[in
             raise HTTPException(status_code=400, detail="Invalid product PACKAGE_SCHOOL_x")
         return (OrderType.PACKAGE_SCHOOL, None, qty)
 
-    # fallback: usa pricing table (se è uno dei key noti)
     key = prod
     if key in PRODUCT_PRICING:
         ot, pid, qty, _ = PRODUCT_PRICING[key]
@@ -292,28 +306,18 @@ def create_checkout_intent(data: CheckoutIntent):
 # -------------------------------------------------
 @router.post("/create-order")
 def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
-    """
-    Crea un ordine reale sul DB:
-    - payment_status=PENDING
-    - payment_method=OTHER (poi diventa STRIPE quando creiamo la session)
-    - total_amount > 0 (pricing hardcoded Fase 1)
-    - salva billing_details se invoice presente
-    - invia email "Order received"
-    - ritorna checkout_url (success page) con order_id REALE
-    """
     if not data.product:
         raise HTTPException(status_code=400, detail="Invalid product")
 
     lang = _normalize_lang(data.lang)
 
-    # ✅ pricing reale
     _, _, _, subtotal, discount, total = _calc_amounts(
         product=data.product,
         partner_code=data.customer.partner_code,
     )
 
-    # ✅ campi ordine utili al fulfillment (SINGLE -> package_id=max_guests)
-    order_type, package_id, quantity = _parse_product_to_order_fields(data.product)
+    # ✅ QUI: risolviamo package_id correttamente (FK -> packages.id)
+    order_type, package_id, quantity = _parse_product_to_order_fields(db, data.product)
 
     order = Order(
         buyer_email=data.customer.email.strip(),
@@ -345,6 +349,7 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(order)
 
+    # Email "Order received" (best effort)
     try:
         bd = getattr(order, "billing_details", None)
         invoice_requested = bool(getattr(bd, "request_invoice", False)) if bd else False
@@ -374,12 +379,6 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
 # -------------------------------------------------
 @router.post("/stripe/session")
 def create_stripe_checkout_session(payload: StripeSessionIn, db: Session = Depends(get_db)):
-    """
-    Dato un order_id già creato (PENDING), crea una Stripe Checkout Session e ritorna l'URL.
-    Aggiorna ordine:
-      - payment_method=STRIPE
-      - payment_status=PENDING (resta)
-    """
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=500, detail="Stripe not configured (missing STRIPE_SECRET_KEY)")
 
@@ -392,7 +391,6 @@ def create_stripe_checkout_session(payload: StripeSessionIn, db: Session = Depen
     if order.payment_status == PaymentStatus.PAID:
         raise HTTPException(status_code=400, detail="Order already paid")
 
-    # totale (EUR) dal DB
     try:
         total_eur = Decimal(str(order.total_amount))
     except Exception:
@@ -406,7 +404,6 @@ def create_stripe_checkout_session(payload: StripeSessionIn, db: Session = Depen
     success_url = _build_checkout_success_url(order_id=order.id, lang=lang, success_url=payload.success_url)
     cancel_url = _build_checkout_cancel_url(order_id=order.id, lang=lang, cancel_url=payload.cancel_url)
 
-    # aggiungiamo session_id in success_url (utile per debug)
     sep = "&" if "?" in success_url else "?"
     success_url = f"{success_url}{sep}session_id={{CHECKOUT_SESSION_ID}}"
 

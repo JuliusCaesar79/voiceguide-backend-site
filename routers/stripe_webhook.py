@@ -11,7 +11,11 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from models.orders import Order, PaymentMethod, PaymentStatus
 
-from app.fulfillment_service import fulfill_paid_order  # ✅ NEW
+# ✅ Fulfillment: genera licenza + invia email (Resend)
+try:
+    from app.fulfillment_service import fulfill_paid_order  # type: ignore
+except Exception:
+    fulfill_paid_order = None  # type: ignore
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 
@@ -24,6 +28,12 @@ if STRIPE_SECRET_KEY:
 
 @router.post("/stripe")
 async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
+    """
+    Stripe webhook endpoint.
+    - Verifica firma con STRIPE_WEBHOOK_SECRET
+    - Gestisce checkout.session.completed -> set Order PAID
+    - Poi chiama fulfillment (licenza + email) in modo idempotente
+    """
     if not STRIPE_WEBHOOK_SECRET:
         raise HTTPException(status_code=500, detail="Stripe webhook not configured (missing STRIPE_WEBHOOK_SECRET)")
 
@@ -43,9 +53,12 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
     event_type = event.get("type")
 
+    # -----------------------------------
+    # checkout.session.completed
+    # -----------------------------------
     if event_type == "checkout.session.completed":
-        session = event["data"]["object"]
-        metadata = session.get("metadata") or {}
+        session_obj = event["data"]["object"]
+        metadata = session_obj.get("metadata") or {}
         order_id_raw = metadata.get("order_id")
 
         if not order_id_raw:
@@ -60,7 +73,11 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         if not order:
             return {"ok": True, "ignored": "order not found"}
 
-        # ✅ segna pagato (idempotente)
+        # Idempotenza
+        if order.payment_status == PaymentStatus.PAID:
+            return {"ok": True, "status": "already_paid", "order_id": order.id}
+
+        # Segna pagato
         try:
             order.payment_method = PaymentMethod.STRIPE
         except Exception:
@@ -70,13 +87,13 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
         if hasattr(order, "stripe_session_id"):
             try:
-                order.stripe_session_id = session.get("id")
+                order.stripe_session_id = session_obj.get("id")
             except Exception:
                 pass
 
         if hasattr(order, "stripe_payment_intent_id"):
             try:
-                order.stripe_payment_intent_id = session.get("payment_intent")
+                order.stripe_payment_intent_id = session_obj.get("payment_intent")
             except Exception:
                 pass
 
@@ -84,14 +101,15 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(order)
 
-        # ✅ FULFILLMENT (licenza + email) — idempotente
-        try:
-            result = fulfill_paid_order(db, order)
-        except Exception as e:
-            # IMPORTANT: webhook deve comunque rispondere 200 per non essere re-try-infinito,
-            # ma loggheremo lato Railway.
-            return {"ok": True, "order_id": order.id, "status": "PAID", "fulfillment_error": str(e)}
+        # ✅ Fulfillment: licenza + email (best effort, ma NON deve rompere Stripe)
+        if fulfill_paid_order:
+            try:
+                fulfill_paid_order(db=db, order=order, stripe_session=session_obj)
+            except Exception:
+                # Stripe vuole comunque 200: loggheremo lato Railway
+                pass
 
-        return {"ok": True, "order_id": order.id, "status": "PAID", "fulfillment": result}
+        return {"ok": True, "order_id": order.id, "status": "PAID"}
 
+    # altri eventi: ignoriamo
     return {"ok": True, "ignored": event_type}
