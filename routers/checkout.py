@@ -9,6 +9,7 @@ from typing import Optional, Literal, Dict, Any
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.email_service import send_order_received_email
 from models.orders import Order, OrderType, PaymentMethod, PaymentStatus
 from models.order_billing_details import OrderBillingDetails
 
@@ -130,8 +131,6 @@ def _save_billing_from_invoice(db: Session, order_id: int, invoice: Invoice) -> 
         vat_number = (ext.get("vat_or_tax_id") or "").strip() or None
         country = _normalize_country_iso2(ext.get("country"))
 
-    # Se manca intestatario in modalità fattura, lasciamo comunque salvare per test,
-    # ma idealmente il frontend lo rende obbligatorio.
     bd = OrderBillingDetails(
         order_id=order_id,
         request_invoice=request_invoice,
@@ -187,11 +186,8 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
     - payment_method=OTHER
     - total_amount=0.00 (per ora: test / pre-pagamento)
     - salva billing_details se invoice presente
+    - invia email "Order received"
     - ritorna checkout_url verso la success page con order_id REALE
-
-    Quando collegheremo Stripe/PayPal:
-    - calcoleremo importi reali
-    - aggiorneremo a PAID via webhook/return
     """
 
     if not data.product:
@@ -238,12 +234,19 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(order)
 
-    # ✅ Email: se avete già una funzione email in backend, agganciala qui.
-    # Non facciamo fallire l'ordine se l'email non è configurata in questa fase.
+    # ✅ Email "Order received" (non deve bloccare l'ordine se fallisce)
     try:
-        # Esempio: from services.email import send_order_received_email
-        # send_order_received_email(to=order.buyer_email, order_id=order.id)
-        pass
+        bd = getattr(order, "billing_details", None)
+        invoice_requested = bool(getattr(bd, "request_invoice", False)) if bd else False
+        intestatario = getattr(bd, "company_name", None) if bd else None
+
+        send_order_received_email(
+            to_email=order.buyer_email,
+            order_id=order.id,
+            product=data.product,
+            invoice_requested=invoice_requested,
+            intestatario=intestatario,
+        )
     except Exception:
         pass
 

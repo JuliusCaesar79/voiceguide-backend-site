@@ -130,6 +130,75 @@ def send_receipt_email(
     _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
 
 
+# =================================================
+# NEW: ORDER RECEIVED (PENDING) — per checkout “reale” senza Stripe/PayPal
+# =================================================
+def send_order_received_email(
+    to_email: str,
+    order_id: int,
+    product: str,
+    invoice_requested: bool,
+    intestatario: str | None = None,
+) -> None:
+    """
+    Email inviata quando creiamo un ordine "reale" in DB ma pagamento ancora PENDING.
+    Utile per attivare subito:
+    - tracciamento ordini in Admin
+    - invio email immediato
+    anche prima di integrare Stripe/PayPal.
+    """
+    subject = "VoiceGuide — Order received ✅"
+
+    inv_line = "Invoice requested: YES" if invoice_requested else "Invoice requested: NO"
+    if invoice_requested and intestatario:
+        inv_line += f" ({intestatario})"
+
+    text_body = "\n".join(
+        [
+            "Hello,",
+            "",
+            "We have received your order on VoiceGuide.",
+            "",
+            f"Order ID: {order_id}",
+            f"Product: {product}",
+            inv_line,
+            "",
+            "Payment status: PENDING",
+            "",
+            "We will send you a confirmation email as soon as the payment is completed.",
+            "",
+            "If you have any questions, simply reply to this email.",
+            "",
+            "Best regards,",
+            "VoiceGuide Team",
+        ]
+    )
+
+    html_body = f"""
+    <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
+      <p>Hello,</p>
+
+      <p>We have received your order on <b>VoiceGuide</b>.</p>
+
+      <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
+        <div style="font-size:12px;color:#666;margin-bottom:6px;">Order details</div>
+        <div style="font-size:14px;">
+          <b>Order ID:</b> {order_id}<br/>
+          <b>Product:</b> {escape(product)}<br/>
+          <b>{escape(inv_line)}</b><br/>
+          <b>Payment status:</b> PENDING
+        </div>
+      </div>
+
+      <p>We will send you a confirmation email as soon as the payment is completed.</p>
+
+      <p style="margin-top:18px;color:#444;">Best regards,<br/><b>VoiceGuide Team</b></p>
+    </div>
+    """.strip()
+
+    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
+
+
 # -------------------------------------------------
 # PARTNER REQUEST EMAILS (APPROVE / REJECT) - ENGLISH
 # -------------------------------------------------
