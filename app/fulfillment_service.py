@@ -11,38 +11,15 @@ from typing import Any, Optional
 import requests
 from sqlalchemy.orm import Session
 
-from models.orders import Order, OrderType, PaymentMethod, PaymentStatus
+from models.orders import Order, OrderType, PaymentStatus
 from models.licenses import License, LicenseType
 from models.partners import Partner
 from models.partner_payouts import PartnerPayout
+from models.packages import Package  # ✅
 
 from app.email_service import send_payment_received_email
 
 logger = logging.getLogger(__name__)
-
-# -----------------------------
-# PRICING (allineato a purchase.py)
-# -----------------------------
-LICENSE_PRICES: dict[int, Decimal] = {
-    10: Decimal("7.99"),
-    25: Decimal("14.99"),
-    35: Decimal("19.99"),
-    100: Decimal("49.99"),
-}
-
-TO_PACKAGES: dict[int, Decimal] = {
-    10: Decimal("119"),
-    20: Decimal("225"),
-    50: Decimal("525"),
-    100: Decimal("975"),
-}
-
-SCHOOL_PACKAGES: dict[int, Decimal] = {
-    1: Decimal("29.99"),
-    5: Decimal("135"),
-    10: Decimal("249"),
-    30: Decimal("675"),
-}
 
 # -----------------------------
 # AGORA COST (internal)
@@ -72,9 +49,9 @@ def estimate_agora_cost_for_single_license(max_guests: int) -> Decimal:
     return money2(cost)
 
 
-def estimate_agora_cost_for_package(num_licenses: int, max_guests_per_license: int) -> Decimal:
+def estimate_agora_cost_for_n_licenses(n: int, max_guests_per_license: int) -> Decimal:
     per_license = estimate_agora_cost_for_single_license(max_guests_per_license)
-    return money2(per_license * Decimal(num_licenses))
+    return money2(per_license * Decimal(n))
 
 
 def generate_license_code() -> str:
@@ -133,18 +110,36 @@ def _calc_partner_discount(subtotal: Decimal, partner: Optional[Partner]) -> Dec
     return money2((subtotal * PARTNER_DISCOUNT_PCT) / Decimal("100"))
 
 
-def _product_label_for_email(order: Order, max_guests: Optional[int]) -> str:
+def _product_label_for_email(order: Order, package: Optional[Package]) -> str:
     if order.order_type == OrderType.SINGLE:
-        mg = max_guests or 0
+        mg = int(package.max_guests) if package else 0
         return f"SINGLE_{mg}"
     if order.order_type == OrderType.PACKAGE_TO:
-        return f"PACKAGE_TO_{order.quantity}"
+        nl = int(package.num_licenses) if package else int(order.quantity or 0)
+        return f"PACKAGE_TO_{nl}"
     if order.order_type == OrderType.PACKAGE_SCHOOL:
-        return f"PACKAGE_SCHOOL_{order.quantity}"
+        nl = int(package.num_licenses) if package else int(order.quantity or 0)
+        return f"PACKAGE_SCHOOL_{nl}"
     return str(order.order_type.value)
 
 
-def fulfill_paid_order(db: Session, order: Order) -> dict[str, Any]:
+def _load_package(db: Session, order: Order) -> Package:
+    if not order.package_id:
+        raise RuntimeError("Order missing package_id.")
+    pkg = db.query(Package).filter(Package.id == int(order.package_id)).first()
+    if not pkg:
+        raise RuntimeError(f"Package not found for package_id={order.package_id}")
+    if hasattr(pkg, "is_active") and pkg.is_active is False:
+        raise RuntimeError("Package is not active.")
+    return pkg
+
+
+def fulfill_paid_order(
+    *,
+    db: Session,
+    order: Order,
+    stripe_session: Optional[dict[str, Any]] = None,  # ✅ accetta stripe_session
+) -> dict[str, Any]:
     """
     Fulfillment idempotente:
     - se esistono già licenze per order_id -> non rigenerare (webhook può arrivare più volte)
@@ -155,8 +150,8 @@ def fulfill_paid_order(db: Session, order: Order) -> dict[str, Any]:
     if order.payment_status != PaymentStatus.PAID:
         raise RuntimeError("Order is not PAID. Refusing fulfillment.")
 
-    # idempotenza: se già create licenze, non rigenerare
-    existing = db.query(License).filter(License.order_id == order.id).all()
+    # idempotenza
+    existing = db.query(License).filter(License.order_id == order.id).order_by(License.id.asc()).all()
     if existing:
         first_code = existing[0].code if existing else None
         try:
@@ -172,42 +167,33 @@ def fulfill_paid_order(db: Session, order: Order) -> dict[str, Any]:
 
     partner = _get_active_partner_by_code(db, order.referral_code)
 
-    # calcolo prezzi + parametri licenza
-    max_guests: Optional[int] = None
-    license_type = LicenseType.SINGLE
+    # ✅ usa la tabella packages (FK)
+    pkg = _load_package(db, order)
 
+    # mapping license_type
     if order.order_type == OrderType.SINGLE:
-        # 🔥 convenzione: per SINGLE usiamo package_id come max_guests
-        max_guests = int(order.package_id or 0)
-        if max_guests not in LICENSE_PRICES:
-            raise RuntimeError("Missing/invalid max_guests on order (package_id).")
-        subtotal = money2(LICENSE_PRICES[max_guests] * Decimal(order.quantity or 1))
-        est_cost = estimate_agora_cost_for_single_license(max_guests)
         license_type = LicenseType.SINGLE
-
     elif order.order_type == OrderType.PACKAGE_TO:
-        if order.quantity not in TO_PACKAGES:
-            raise RuntimeError("Invalid bundle_size for PACKAGE_TO.")
-        subtotal = money2(TO_PACKAGES[int(order.quantity)])
-        max_guests = 25
-        est_cost = estimate_agora_cost_for_package(int(order.quantity), max_guests)
         license_type = LicenseType.TO
-
     elif order.order_type == OrderType.PACKAGE_SCHOOL:
-        if order.quantity not in SCHOOL_PACKAGES:
-            raise RuntimeError("Invalid bundle_size for PACKAGE_SCHOOL.")
-        subtotal = money2(SCHOOL_PACKAGES[int(order.quantity)])
-        max_guests = 100
-        est_cost = estimate_agora_cost_for_package(int(order.quantity), max_guests)
         license_type = LicenseType.SCHOOL
-
     else:
         raise RuntimeError(f"Unsupported order_type: {order.order_type}")
 
+    max_guests = int(pkg.max_guests or 0)
+    num_licenses_per_unit = int(pkg.num_licenses or 1)
+    units = int(order.quantity or 1)
+
+    total_licenses_to_create = units * num_licenses_per_unit
+
+    # prezzi + costi
+    subtotal = money2(Decimal(str(pkg.price)) * Decimal(units))
     discount = _calc_partner_discount(subtotal, partner)
     total = money2(subtotal - discount)
 
-    # aggiorna order breakdown (così admin vede importi veri)
+    est_cost = estimate_agora_cost_for_n_licenses(total_licenses_to_create, max_guests)
+
+    # aggiorna breakdown ordine
     order.subtotal_amount = subtotal
     order.discount_amount = discount
     order.total_amount = total
@@ -215,7 +201,7 @@ def fulfill_paid_order(db: Session, order: Order) -> dict[str, Any]:
     if partner:
         order.partner_id = partner.id
 
-    # partner payout (se partner)
+    # partner payout
     if partner:
         try:
             payout_amount = money2((total * Decimal(str(partner.commission_pct))) / Decimal("100"))
@@ -231,20 +217,19 @@ def fulfill_paid_order(db: Session, order: Order) -> dict[str, Any]:
 
     # crea licenze
     created_codes: list[str] = []
-    for _ in range(int(order.quantity or 1)):
+    for _ in range(total_licenses_to_create):
         code = generate_license_code()
 
-        # AirLink first
         _airlink_create_license(
             code=code,
-            max_listeners=int(max_guests or 0),
+            max_listeners=max_guests,
             duration_minutes=STANDARD_TOUR_MINUTES,
         )
 
         lic = License(
             code=code,
             license_type=license_type,
-            max_guests=int(max_guests or 0),
+            max_guests=max_guests,
             order_id=order.id,
         )
         db.add(lic)
@@ -254,12 +239,12 @@ def fulfill_paid_order(db: Session, order: Order) -> dict[str, Any]:
     db.commit()
     db.refresh(order)
 
-    # email payment confirmed (con primo codice)
+    # email (primo codice)
     try:
         send_payment_received_email(
             to_email=order.buyer_email,
             order_id=order.id,
-            product=_product_label_for_email(order, max_guests),
+            product=_product_label_for_email(order, pkg),
             license_code=(created_codes[0] if created_codes else None),
         )
     except Exception:
