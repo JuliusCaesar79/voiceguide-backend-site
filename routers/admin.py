@@ -37,12 +37,14 @@ def _serialize_billing_details(order: Order) -> Dict[str, Any]:
     Non richiede modifiche al DB: usa Order.billing_details (1:1).
     """
     bd = getattr(order, "billing_details", None)
+
+    # Se non esiste record, oppure request_invoice = False → fattura non richiesta
     if not bd or not getattr(bd, "request_invoice", False):
         return {
             "invoice_requested": False,
             "invoice_intestatario": None,
             "invoice_country": None,
-            "billing_details": None,  # dettagli completi: None se non richiesti
+            "billing_details": None,
         }
 
     billing_details = {
@@ -99,6 +101,7 @@ def admin_list_orders(
     - invoice_requested (bool)
     - invoice_intestatario (str|null)
     - invoice_country (str|null)
+    - billing_details (object|null)  <-- dettagli completi per UI admin
     """
     query = (
         db.query(Order)
@@ -119,7 +122,7 @@ def admin_list_orders(
 
     orders = query.all()
 
-    items = []
+    items: List[Dict[str, Any]] = []
     total_amount = 0.0
     total_estimated_agora_cost = 0.0
     total_margin = 0.0
@@ -141,7 +144,7 @@ def admin_list_orders(
 
         billing = _serialize_billing_details(o)
 
-        item = {
+        item: Dict[str, Any] = {
             "id": o.id,
             "created_at": o.created_at.isoformat() if o.created_at else None,
             "buyer_email": o.buyer_email,
@@ -157,10 +160,11 @@ def admin_list_orders(
             "partner_id": o.partner_id,
             "referral_code": o.referral_code,
 
-            # ✅ NUOVI CAMPI PER ADMIN UI
+            # ✅ campi fatturazione (riassunto + dettagli completi)
             "invoice_requested": billing["invoice_requested"],
             "invoice_intestatario": billing["invoice_intestatario"],
             "invoice_country": billing["invoice_country"],
+            "billing_details": billing["billing_details"],
         }
         items.append(item)
 
@@ -229,7 +233,7 @@ def admin_get_order_detail(
         "partner_id": order.partner_id,
         "referral_code": order.referral_code,
 
-        # ✅ NUOVI CAMPI
+        # ✅ fatturazione
         "invoice_requested": billing["invoice_requested"],
         "invoice_intestatario": billing["invoice_intestatario"],
         "invoice_country": billing["invoice_country"],
