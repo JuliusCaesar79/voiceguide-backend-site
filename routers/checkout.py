@@ -116,7 +116,6 @@ def _build_checkout_cancel_url(order_id: int, lang: str, cancel_url: Optional[An
         base_cancel = str(cancel_url)
         sep = "&" if "?" in base_cancel else "?"
         return f"{base_cancel}{sep}order={order_id}"
-    # pagina “checkout” (se non esiste ancora, va bene comunque: la creeremo/mapperemo)
     return f"{SITE_URL}/{lang}/checkout?order={order_id}"
 
 
@@ -134,7 +133,6 @@ def _save_billing_from_invoice(db: Session, order_id: int, invoice: Invoice) -> 
     mode = invoice.mode
     addr = invoice.address
 
-    # Base
     request_invoice = True
 
     country = None
@@ -185,8 +183,8 @@ def _save_billing_from_invoice(db: Session, order_id: int, invoice: Invoice) -> 
 # Pricing (Fase 1: hardcoded, poi DB)
 # -------------------------------------------------
 # product -> (order_type, package_id, quantity, unit_price_eur)
+# NOTE: per SINGLE_XX useremo package_id=XX (max guests) in create-order (override)
 PRODUCT_PRICING: Dict[str, Tuple[OrderType, Optional[int], int, Decimal]] = {
-    # SINGOLE LICENZE (esempi dal nostro modello)
     "SINGLE_10": (OrderType.SINGLE, None, 1, Decimal("7.99")),
     "SINGLE_25": (OrderType.SINGLE, None, 1, Decimal("14.99")),
     "SINGLE_35": (OrderType.SINGLE, None, 1, Decimal("19.99")),
@@ -215,7 +213,6 @@ def _calc_amounts(product: str, partner_code: Optional[str]) -> Tuple[OrderType,
     discount = _money2(subtotal * discount_rate)
     total = _money2(subtotal - discount)
 
-    # sicurezza
     if total <= Decimal("0.00"):
         raise HTTPException(status_code=400, detail="Total amount must be > 0")
 
@@ -225,6 +222,46 @@ def _calc_amounts(product: str, partner_code: Optional[str]) -> Tuple[OrderType,
 def _eur_to_cents(amount_eur: Decimal) -> int:
     a = _money2(amount_eur)
     return int((a * 100).to_integral_value(rounding=ROUND_HALF_UP))
+
+
+def _parse_product_to_order_fields(product: str) -> Tuple[OrderType, Optional[int], int]:
+    """
+    Interpreta la stringa product per salvare campi utili al fulfillment.
+    Convenzione:
+      - SINGLE_10/25/35/100 -> order_type=SINGLE, package_id=<max_guests>, quantity=1
+      - PACKAGE_TO_10/20/50/100 -> order_type=PACKAGE_TO, quantity=<bundle_size>, package_id=None
+      - PACKAGE_SCHOOL_1/5/10/30 -> order_type=PACKAGE_SCHOOL, quantity=<bundle_size>, package_id=None
+    """
+    prod = (product or "").strip().upper()
+
+    if prod.startswith("SINGLE_"):
+        try:
+            mg = int(prod.split("_", 1)[1])
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid product SINGLE_x")
+        return (OrderType.SINGLE, mg, 1)
+
+    if prod.startswith("PACKAGE_TO_"):
+        try:
+            qty = int(prod.split("_")[-1])
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid product PACKAGE_TO_x")
+        return (OrderType.PACKAGE_TO, None, qty)
+
+    if prod.startswith("PACKAGE_SCHOOL_"):
+        try:
+            qty = int(prod.split("_")[-1])
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid product PACKAGE_SCHOOL_x")
+        return (OrderType.PACKAGE_SCHOOL, None, qty)
+
+    # fallback: usa pricing table (se è uno dei key noti)
+    key = prod
+    if key in PRODUCT_PRICING:
+        ot, pid, qty, _ = PRODUCT_PRICING[key]
+        return ot, pid, qty
+
+    raise HTTPException(status_code=400, detail=f"Invalid product: {product}")
 
 
 # -------------------------------------------------
@@ -270,12 +307,14 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
     lang = _normalize_lang(data.lang)
 
     # ✅ pricing reale
-    order_type, package_id, quantity, subtotal, discount, total = _calc_amounts(
+    _, _, _, subtotal, discount, total = _calc_amounts(
         product=data.product,
         partner_code=data.customer.partner_code,
     )
 
-    # ✅ Crea ordine DB
+    # ✅ campi ordine utili al fulfillment (SINGLE -> package_id=max_guests)
+    order_type, package_id, quantity = _parse_product_to_order_fields(data.product)
+
     order = Order(
         buyer_email=data.customer.email.strip(),
         buyer_whatsapp=(data.customer.whatsapp.strip() if data.customer.whatsapp else None),
@@ -298,16 +337,14 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
     )
 
     db.add(order)
-    db.flush()  # otteniamo order.id senza commit
+    db.flush()
 
-    # ✅ salva fatturazione se richiesta
     if data.invoice is not None:
         _save_billing_from_invoice(db, order_id=order.id, invoice=data.invoice)
 
     db.commit()
     db.refresh(order)
 
-    # ✅ Email "Order received" (non deve bloccare l'ordine se fallisce)
     try:
         bd = getattr(order, "billing_details", None)
         invoice_requested = bool(getattr(bd, "request_invoice", False)) if bd else False
@@ -369,13 +406,10 @@ def create_stripe_checkout_session(payload: StripeSessionIn, db: Session = Depen
     success_url = _build_checkout_success_url(order_id=order.id, lang=lang, success_url=payload.success_url)
     cancel_url = _build_checkout_cancel_url(order_id=order.id, lang=lang, cancel_url=payload.cancel_url)
 
-    # 👉 aggiungiamo anche session_id in success_url, utile per debug / future webhook mapping
-    # Stripe sostituirà {CHECKOUT_SESSION_ID}
+    # aggiungiamo session_id in success_url (utile per debug)
     sep = "&" if "?" in success_url else "?"
     success_url = f"{success_url}{sep}session_id={{CHECKOUT_SESSION_ID}}"
 
-    # line item minimale (Fase 1)
-    # name: possiamo usare order_type o product quando lo aggiungeremo in tabella
     title = f"VoiceGuide License (Order #{order.id})"
 
     try:
@@ -402,13 +436,11 @@ def create_stripe_checkout_session(payload: StripeSessionIn, db: Session = Depen
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Stripe error: {str(e)}")
 
-    # aggiorna ordine (senza assumere campi extra)
     try:
         order.payment_method = PaymentMethod.STRIPE
     except Exception:
         pass
 
-    # se nel model esiste un campo per salvare session id, lo valorizziamo senza rompere
     if hasattr(order, "stripe_session_id"):
         try:
             setattr(order, "stripe_session_id", session.id)
