@@ -499,3 +499,68 @@ def send_trial_license_email(
     """.strip()
 
     _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
+
+def send_payment_received_email(
+    to_email: str,
+    order_id: int,
+    product: str | None = None,
+    license_code: str | None = None,
+) -> None:
+    """
+    Email inviata quando Stripe/PayPal conferma il pagamento.
+    (La licenza può essere inclusa se già disponibile.)
+    """
+    subject = "VoiceGuide — Payment confirmed ✅"
+
+    lines = [
+        "Hello,",
+        "",
+        "Your payment has been confirmed.",
+        "",
+        f"Order ID: {order_id}",
+    ]
+    if product:
+        lines.append(f"Product: {product}")
+    if license_code:
+        lines += ["", "Your license code:", license_code]
+
+    lines += [
+        "",
+        "If you have any questions, just reply to this email.",
+        "",
+        "Best regards,",
+        "VoiceGuide Team",
+    ]
+    text_body = "\n".join(lines)
+
+    license_html = ""
+    if license_code:
+        license_html = f"""
+        <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
+          <div style="font-size:12px;color:#666;margin-bottom:6px;">Your License Code</div>
+          <div style="font-size:22px;letter-spacing:1px;"><b>{escape(license_code)}</b></div>
+        </div>
+        """.strip()
+
+    html_body = f"""
+    <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
+      <p>Hello,</p>
+      <p>Your payment has been <b>confirmed</b>.</p>
+
+      <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
+        <div style="font-size:12px;color:#666;margin-bottom:6px;">Order details</div>
+        <div style="font-size:14px;">
+          <b>Order ID:</b> {order_id}<br/>
+          {"<b>Product:</b> " + escape(product) + "<br/>" if product else ""}
+          <b>Status:</b> PAID
+        </div>
+      </div>
+
+      {license_html}
+
+      <p>If you have any questions, just reply to this email.</p>
+      <p style="margin-top:18px;color:#444;">Best regards,<br/><b>VoiceGuide Team</b></p>
+    </div>
+    """.strip()
+
+    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
