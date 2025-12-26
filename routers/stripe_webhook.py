@@ -11,12 +11,6 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from models.orders import Order, PaymentMethod, PaymentStatus
 
-# ✅ Licenses model (per idempotenza fulfillment)
-try:
-    from models.licenses import License  # type: ignore
-except Exception:
-    License = None  # type: ignore
-
 # ✅ Fulfillment: genera licenza + invia email (Resend)
 try:
     from app.fulfillment_service import fulfill_paid_order  # type: ignore
@@ -32,24 +26,13 @@ if STRIPE_SECRET_KEY:
     stripe.api_key = STRIPE_SECRET_KEY
 
 
-def _has_fulfillment(db: Session, order_id: int) -> bool:
-    """
-    Ritorna True se l'ordine risulta già 'fulfillato' (almeno 1 licenza creata).
-    Se il modello License non è disponibile, torna False e demandiamo al service l'idempotenza.
-    """
-    if not License:
-        return False
-    return db.query(License.id).filter(License.order_id == order_id).first() is not None
-
-
 @router.post("/stripe")
 async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     """
     Stripe webhook endpoint.
     - Verifica firma con STRIPE_WEBHOOK_SECRET
-    - Gestisce checkout.session.completed:
-        1) marca ordine PAID (se non già PAID)
-        2) esegue fulfillment idempotente (licenze + email)
+    - Gestisce checkout.session.completed -> set Order PAID
+    - Poi chiama fulfillment (licenza + email) SEMPRE (idempotente)
     """
     if not STRIPE_WEBHOOK_SECRET:
         raise HTTPException(
@@ -93,16 +76,17 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         if not order:
             return {"ok": True, "ignored": "order not found"}
 
-        # 1) Se NON è già pagato, marca pagato
-        if order.payment_status != PaymentStatus.PAID:
+        # Se NON è pagato, lo segniamo pagato
+        was_paid = (order.payment_status == PaymentStatus.PAID)
+
+        if not was_paid:
             try:
                 order.payment_method = PaymentMethod.STRIPE
             except Exception:
                 pass
-
             order.payment_status = PaymentStatus.PAID
 
-            # Campi opzionali (non rompere se non esistono nel DB)
+            # campi extra opzionali (se esistono nel model)
             if hasattr(order, "stripe_session_id"):
                 try:
                     order.stripe_session_id = session_obj.get("id")
@@ -119,26 +103,20 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             db.commit()
             db.refresh(order)
 
-        # 2) Fulfillment idempotente:
-        #    - Se già ci sono licenze -> OK
-        #    - Se non ci sono licenze -> prova fulfillment
-        already_fulfilled = _has_fulfillment(db, order.id)
-
-        if (not already_fulfilled) and fulfill_paid_order:
+        # ✅ Fulfillment SEMPRE (idempotente): anche se era già PAID
+        if fulfill_paid_order:
             try:
                 fulfill_paid_order(db=db, order=order, stripe_session=session_obj)
-                # NOTA: se fulfill_paid_order crea licenze, ora risulterà fulfillato
-                already_fulfilled = _has_fulfillment(db, order.id) if License else True
-            except Exception:
-                # Stripe vuole 200 comunque. L'errore lo vediamo nei log Railway.
-                pass
+            except Exception as e:
+                # Stripe vuole comunque 200: logghiamo per debug
+                print(f"[stripe_webhook] fulfill_paid_order ERROR for order_id={order.id}: {e}")
 
         return {
             "ok": True,
             "order_id": order.id,
             "status": "PAID",
-            "fulfilled": bool(already_fulfilled),
+            "was_already_paid": was_paid,
+            "fulfillment_enabled": bool(fulfill_paid_order),
         }
 
-    # altri eventi: ignoriamo
     return {"ok": True, "ignored": event_type}
