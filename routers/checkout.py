@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import os
+from decimal import Decimal, ROUND_HALF_UP
+
+import stripe
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr, AnyHttpUrl
-from typing import Optional, Literal, Dict, Any
+from typing import Optional, Literal, Dict, Any, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -19,6 +23,15 @@ InvoiceMode = Literal["PERSON_IT", "VAT_IT", "COMPANY_EXT"]
 
 SUPPORTED_LANGS = {"it", "en", "es", "fr", "de"}
 SITE_URL = "https://voiceguideapp.com"  # dominio pubblico del sito
+
+# -------------------------------------------------
+# Stripe config
+# -------------------------------------------------
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
+STRIPE_CURRENCY = os.getenv("STRIPE_CURRENCY", "eur").strip().lower()
+
+if STRIPE_SECRET_KEY:
+    stripe.api_key = STRIPE_SECRET_KEY
 
 
 # -----------------------------
@@ -57,6 +70,13 @@ class CheckoutIntent(BaseModel):
     cancel_url: Optional[AnyHttpUrl] = None
 
 
+class StripeSessionIn(BaseModel):
+    order_id: int
+    lang: Optional[str] = "it"
+    success_url: Optional[AnyHttpUrl] = None
+    cancel_url: Optional[AnyHttpUrl] = None
+
+
 def _normalize_lang(lang: Optional[str]) -> str:
     v = (lang or "it").lower().strip()
     return v if v in SUPPORTED_LANGS else "it"
@@ -79,12 +99,25 @@ def _normalize_country_iso2(raw: Optional[str], fallback: Optional[str] = None) 
     return s2[:2].upper()
 
 
-def _build_checkout_url(order_id: int, lang: str, success_url: Optional[AnyHttpUrl]) -> str:
+def _build_checkout_success_url(order_id: int, lang: str, success_url: Optional[AnyHttpUrl]) -> str:
+    """
+    Success page del sito (con order=ID).
+    Nota: Stripe aggiungerà anche session_id come {CHECKOUT_SESSION_ID} se la usiamo nei template.
+    """
     if success_url:
         base_success = str(success_url)
         sep = "&" if "?" in base_success else "?"
         return f"{base_success}{sep}order={order_id}"
     return f"{SITE_URL}/{lang}/checkout-success?order={order_id}"
+
+
+def _build_checkout_cancel_url(order_id: int, lang: str, cancel_url: Optional[AnyHttpUrl]) -> str:
+    if cancel_url:
+        base_cancel = str(cancel_url)
+        sep = "&" if "?" in base_cancel else "?"
+        return f"{base_cancel}{sep}order={order_id}"
+    # pagina “checkout” (se non esiste ancora, va bene comunque: la creeremo/mapperemo)
+    return f"{SITE_URL}/{lang}/checkout?order={order_id}"
 
 
 def _save_billing_from_invoice(db: Session, order_id: int, invoice: Invoice) -> None:
@@ -149,24 +182,66 @@ def _save_billing_from_invoice(db: Session, order_id: int, invoice: Invoice) -> 
 
 
 # -------------------------------------------------
+# Pricing (Fase 1: hardcoded, poi DB)
+# -------------------------------------------------
+# product -> (order_type, package_id, quantity, unit_price_eur)
+PRODUCT_PRICING: Dict[str, Tuple[OrderType, Optional[int], int, Decimal]] = {
+    # SINGOLE LICENZE (esempi dal nostro modello)
+    "SINGLE_10": (OrderType.SINGLE, None, 1, Decimal("7.99")),
+    "SINGLE_25": (OrderType.SINGLE, None, 1, Decimal("14.99")),
+    "SINGLE_35": (OrderType.SINGLE, None, 1, Decimal("19.99")),
+    "SINGLE_100": (OrderType.SINGLE, None, 1, Decimal("49.99")),
+    # TODO: aggiungere pacchetti TO / SCHOOL quando allineiamo la pagina “Licenze”
+}
+
+
+def _money2(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _calc_amounts(product: str, partner_code: Optional[str]) -> Tuple[OrderType, Optional[int], int, Decimal, Decimal, Decimal]:
+    """
+    Ritorna:
+      order_type, package_id, quantity, subtotal, discount, total (EUR Decimal con 2 decimali)
+    """
+    key = (product or "").strip().upper()
+    if key not in PRODUCT_PRICING:
+        raise HTTPException(status_code=400, detail=f"Invalid product: {product}")
+
+    order_type, package_id, quantity, unit_price = PRODUCT_PRICING[key]
+    subtotal = _money2(unit_price * Decimal(quantity))
+
+    discount_rate = Decimal("0.05") if (partner_code and str(partner_code).strip()) else Decimal("0.00")
+    discount = _money2(subtotal * discount_rate)
+    total = _money2(subtotal - discount)
+
+    # sicurezza
+    if total <= Decimal("0.00"):
+        raise HTTPException(status_code=400, detail="Total amount must be > 0")
+
+    return order_type, package_id, quantity, subtotal, discount, total
+
+
+def _eur_to_cents(amount_eur: Decimal) -> int:
+    a = _money2(amount_eur)
+    return int((a * 100).to_integral_value(rounding=ROUND_HALF_UP))
+
+
+# -------------------------------------------------
 # POST /checkout/intent  (legacy mock)
 # -------------------------------------------------
 @router.post("/intent")
 def create_checkout_intent(data: CheckoutIntent):
-    # TODO: validare prodotto da DB
     if not data.product:
         raise HTTPException(status_code=400, detail="Invalid product")
 
     lang = _normalize_lang(data.lang)
-
-    # TODO: validare partner_code + sconto
     discount = 0.05 if data.customer.partner_code else 0.0
 
-    # MOCK: order_id non-DB
     from uuid import uuid4
     order_id = str(uuid4())
 
-    checkout_url = _build_checkout_url(order_id=order_id, lang=lang, success_url=data.success_url)
+    checkout_url = _build_checkout_success_url(order_id=order_id, lang=lang, success_url=data.success_url)  # type: ignore[arg-type]
 
     return {
         "order_id": order_id,
@@ -181,39 +256,37 @@ def create_checkout_intent(data: CheckoutIntent):
 @router.post("/create-order")
 def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
     """
-    Crea un ordine reale sul DB anche senza Stripe/PayPal:
+    Crea un ordine reale sul DB:
     - payment_status=PENDING
-    - payment_method=OTHER
-    - total_amount=0.00 (per ora: test / pre-pagamento)
+    - payment_method=OTHER (poi diventa STRIPE quando creiamo la session)
+    - total_amount > 0 (pricing hardcoded Fase 1)
     - salva billing_details se invoice presente
     - invia email "Order received"
-    - ritorna checkout_url verso la success page con order_id REALE
+    - ritorna checkout_url (success page) con order_id REALE
     """
-
     if not data.product:
         raise HTTPException(status_code=400, detail="Invalid product")
 
     lang = _normalize_lang(data.lang)
 
-    # Sconto “logico” (mostrabile a UI), ma importi reali arriveranno con pricing + gateway
-    discount = 0.05 if data.customer.partner_code else 0.0
+    # ✅ pricing reale
+    order_type, package_id, quantity, subtotal, discount, total = _calc_amounts(
+        product=data.product,
+        partner_code=data.customer.partner_code,
+    )
 
     # ✅ Crea ordine DB
     order = Order(
         buyer_email=data.customer.email.strip(),
         buyer_whatsapp=(data.customer.whatsapp.strip() if data.customer.whatsapp else None),
 
-        # Per ora: ordine generico di test (poi mapperemo product -> order_type/package/amount)
-        order_type=OrderType.SINGLE,
-        package_id=None,
-        quantity=1,
+        order_type=order_type,
+        package_id=package_id,
+        quantity=quantity,
 
-        # breakdown (già nel model)
-        subtotal_amount=0,
-        discount_amount=0,
-
-        # totale: 0.00 finché non c’è payment gateway
-        total_amount=0,
+        subtotal_amount=float(subtotal),
+        discount_amount=float(discount),
+        total_amount=float(total),
 
         estimated_agora_cost=None,
 
@@ -250,10 +323,104 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
     except Exception:
         pass
 
-    checkout_url = _build_checkout_url(order_id=order.id, lang=lang, success_url=data.success_url)
+    checkout_url = _build_checkout_success_url(order_id=order.id, lang=lang, success_url=data.success_url)
 
     return {
         "order_id": order.id,
-        "discount_applied": discount,
+        "discount_applied": float(discount),
         "checkout_url": checkout_url,
+    }
+
+
+# -------------------------------------------------
+# POST /checkout/stripe/session  ✅ crea Stripe Checkout Session
+# -------------------------------------------------
+@router.post("/stripe/session")
+def create_stripe_checkout_session(payload: StripeSessionIn, db: Session = Depends(get_db)):
+    """
+    Dato un order_id già creato (PENDING), crea una Stripe Checkout Session e ritorna l'URL.
+    Aggiorna ordine:
+      - payment_method=STRIPE
+      - payment_status=PENDING (resta)
+    """
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=500, detail="Stripe not configured (missing STRIPE_SECRET_KEY)")
+
+    lang = _normalize_lang(payload.lang)
+
+    order = db.query(Order).filter(Order.id == payload.order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if order.payment_status == PaymentStatus.PAID:
+        raise HTTPException(status_code=400, detail="Order already paid")
+
+    # totale (EUR) dal DB
+    try:
+        total_eur = Decimal(str(order.total_amount))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid order amount")
+
+    if total_eur <= Decimal("0.00"):
+        raise HTTPException(status_code=400, detail="Order total_amount must be > 0")
+
+    amount_cents = _eur_to_cents(total_eur)
+
+    success_url = _build_checkout_success_url(order_id=order.id, lang=lang, success_url=payload.success_url)
+    cancel_url = _build_checkout_cancel_url(order_id=order.id, lang=lang, cancel_url=payload.cancel_url)
+
+    # 👉 aggiungiamo anche session_id in success_url, utile per debug / future webhook mapping
+    # Stripe sostituirà {CHECKOUT_SESSION_ID}
+    sep = "&" if "?" in success_url else "?"
+    success_url = f"{success_url}{sep}session_id={{CHECKOUT_SESSION_ID}}"
+
+    # line item minimale (Fase 1)
+    # name: possiamo usare order_type o product quando lo aggiungeremo in tabella
+    title = f"VoiceGuide License (Order #{order.id})"
+
+    try:
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            payment_method_types=["card"],
+            customer_email=order.buyer_email,
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": STRIPE_CURRENCY,
+                        "product_data": {"name": title},
+                        "unit_amount": amount_cents,
+                    },
+                    "quantity": 1,
+                }
+            ],
+            metadata={
+                "order_id": str(order.id),
+            },
+            success_url=success_url,
+            cancel_url=cancel_url,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Stripe error: {str(e)}")
+
+    # aggiorna ordine (senza assumere campi extra)
+    try:
+        order.payment_method = PaymentMethod.STRIPE
+    except Exception:
+        pass
+
+    # se nel model esiste un campo per salvare session id, lo valorizziamo senza rompere
+    if hasattr(order, "stripe_session_id"):
+        try:
+            setattr(order, "stripe_session_id", session.id)
+        except Exception:
+            pass
+
+    db.add(order)
+    db.commit()
+    db.refresh(order)
+
+    return {
+        "order_id": order.id,
+        "stripe_session_id": session.id,
+        "checkout_url": session.url,
     }
