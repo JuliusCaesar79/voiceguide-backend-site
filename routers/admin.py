@@ -1,10 +1,10 @@
 # routers/admin.py
 
 from datetime import datetime, date, timedelta
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
 from app.db import get_db
@@ -31,6 +31,45 @@ def admin_list_partners(
     return partners
 
 
+def _serialize_billing_details(order: Order) -> Dict[str, Any]:
+    """
+    Serializza i dati di fatturazione (se presenti) in modo stabile.
+    Non richiede modifiche al DB: usa Order.billing_details (1:1).
+    """
+    bd = getattr(order, "billing_details", None)
+    if not bd or not getattr(bd, "request_invoice", False):
+        return {
+            "invoice_requested": False,
+            "invoice_intestatario": None,
+            "invoice_country": None,
+            "billing_details": None,  # dettagli completi: None se non richiesti
+        }
+
+    billing_details = {
+        "request_invoice": bool(bd.request_invoice),
+        "country": bd.country,
+        # company_name = INTESTATARIO (persona o azienda)
+        "company_name": bd.company_name,
+        "vat_number": bd.vat_number,
+        "tax_code": bd.tax_code,
+        "address": bd.address,
+        "city": bd.city,
+        "zip_code": bd.zip_code,
+        "province": bd.province,
+        "pec": bd.pec,
+        "sdi_code": bd.sdi_code,
+        "created_at": bd.created_at.isoformat() if bd.created_at else None,
+        "updated_at": bd.updated_at.isoformat() if bd.updated_at else None,
+    }
+
+    return {
+        "invoice_requested": True,
+        "invoice_intestatario": bd.company_name,
+        "invoice_country": bd.country,
+        "billing_details": billing_details,
+    }
+
+
 # -------------------------------------------------
 # GET /admin/orders → Report avanzato ordini
 # -------------------------------------------------
@@ -55,9 +94,16 @@ def admin_list_orders(
           "total_estimated_agora_cost": y.yy,
           "total_margin": z.zz
         }
-    """
 
-    query = db.query(Order)
+    ✅ Aggiunte:
+    - invoice_requested (bool)
+    - invoice_intestatario (str|null)
+    - invoice_country (str|null)
+    """
+    query = (
+        db.query(Order)
+        .options(joinedload(Order.billing_details))  # ✅ carica fatturazione
+    )
 
     # Filtri data su created_at
     if from_date:
@@ -93,6 +139,8 @@ def admin_list_orders(
             total_estimated_agora_cost += estimated_agora_cost
             total_margin += margin
 
+        billing = _serialize_billing_details(o)
+
         item = {
             "id": o.id,
             "created_at": o.created_at.isoformat() if o.created_at else None,
@@ -108,6 +156,11 @@ def admin_list_orders(
             "payment_status": o.payment_status.value if o.payment_status else None,
             "partner_id": o.partner_id,
             "referral_code": o.referral_code,
+
+            # ✅ NUOVI CAMPI PER ADMIN UI
+            "invoice_requested": billing["invoice_requested"],
+            "invoice_intestatario": billing["invoice_intestatario"],
+            "invoice_country": billing["invoice_country"],
         }
         items.append(item)
 
@@ -135,9 +188,14 @@ def admin_get_order_detail(
 ):
     """
     Restituisce il dettaglio di un singolo ordine.
+    Include anche i dettagli fatturazione (se richiesti).
     """
-
-    order = db.query(Order).filter(Order.id == order_id).first()
+    order = (
+        db.query(Order)
+        .options(joinedload(Order.billing_details))  # ✅ carica fatturazione
+        .filter(Order.id == order_id)
+        .first()
+    )
 
     if not order:
         raise HTTPException(
@@ -152,6 +210,8 @@ def admin_get_order_detail(
     margin = None
     if estimated_agora_cost is not None:
         margin = amount_float - estimated_agora_cost
+
+    billing = _serialize_billing_details(order)
 
     return {
         "id": order.id,
@@ -168,6 +228,12 @@ def admin_get_order_detail(
         "payment_status": order.payment_status.value if order.payment_status else None,
         "partner_id": order.partner_id,
         "referral_code": order.referral_code,
+
+        # ✅ NUOVI CAMPI
+        "invoice_requested": billing["invoice_requested"],
+        "invoice_intestatario": billing["invoice_intestatario"],
+        "invoice_country": billing["invoice_country"],
+        "billing_details": billing["billing_details"],
     }
 
 
@@ -188,7 +254,6 @@ def admin_stats_overview(
     - conteggio per tipo ordine
     - conteggio per stato pagamento
     """
-
     # Totale ordini e totale economico
     total_orders = db.query(func.count(Order.id)).scalar() or 0
     total_amount_decimal = db.query(func.coalesce(func.sum(Order.total_amount), 0)).scalar()
