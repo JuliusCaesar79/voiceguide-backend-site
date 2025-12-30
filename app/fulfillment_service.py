@@ -15,7 +15,7 @@ from models.orders import Order, OrderType, PaymentStatus
 from models.licenses import License, LicenseType
 from models.partners import Partner
 from models.partner_payouts import PartnerPayout
-from models.packages import Package  # ✅
+from models.packages import Package
 
 from app.email_service import send_payment_received_email
 
@@ -104,24 +104,15 @@ def _get_active_partner_by_code(db: Session, referral_code: Optional[str]) -> Op
     )
 
 
-def _calc_partner_discount(subtotal: Decimal, partner: Optional[Partner], order: Order, pkg: Package) -> Decimal:
+def _calc_partner_discount(*, subtotal: Decimal, partner: Optional[Partner], order: Order) -> Decimal:
     """
-    Sconto partner:
-    - applicabile solo se partner valido
-    - NON applicabile ai pacchetti SCHOOL (come da descrizione)
+    - sconto 5% SOLO se partner valido
+    - NON applicabile ai pacchetti SCHOOL (coerente con descrizione pacchetto)
     """
     if not partner:
         return Decimal("0.00")
-
-    # Safety: non scontiamo i pacchetti scuola
-    try:
-        if order.order_type == OrderType.PACKAGE_SCHOOL:
-            return Decimal("0.00")
-        if hasattr(pkg, "package_type") and str(pkg.package_type).upper() == "SCHOOL":
-            return Decimal("0.00")
-    except Exception:
-        pass
-
+    if order.order_type == OrderType.PACKAGE_SCHOOL:
+        return Decimal("0.00")
     return money2((subtotal * PARTNER_DISCOUNT_PCT) / Decimal("100"))
 
 
@@ -149,11 +140,34 @@ def _load_package(db: Session, order: Order) -> Package:
     return pkg
 
 
+def _send_payment_email_safe(*, order: Order, product: Optional[str], license_code: Optional[str]) -> None:
+    """
+    Wrapper con log espliciti (così su Railway vedi chiaramente cosa succede).
+    """
+    try:
+        logger.info(
+            "EMAIL: send_payment_received_email START order_id=%s to=%s product=%s license_code=%s",
+            order.id,
+            order.buyer_email,
+            product,
+            license_code,
+        )
+        send_payment_received_email(
+            to_email=order.buyer_email,
+            order_id=order.id,
+            product=product,
+            license_code=license_code,
+        )
+        logger.info("EMAIL: OK order_id=%s to=%s", order.id, order.buyer_email)
+    except Exception as e:
+        logger.exception("EMAIL: FAIL order_id=%s to=%s err=%s", order.id, order.buyer_email, e)
+
+
 def fulfill_paid_order(
     *,
     db: Session,
     order: Order,
-    stripe_session: Optional[dict[str, Any]] = None,  # ✅ accetta stripe_session
+    stripe_session: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """
     Fulfillment idempotente:
@@ -174,34 +188,21 @@ def fulfill_paid_order(
     )
     if existing:
         first_code = existing[0].code if existing else None
+        pkg = None
         try:
-            pkg = _load_package(db, order) if order.package_id else None
+            pkg = _load_package(db, order)
         except Exception:
             pkg = None
-
-        try:
-            logger.info(
-                "EMAIL: send_payment_received_email START (idempotent) order_id=%s to=%s product=%s license_code=%s",
-                order.id,
-                order.buyer_email,
-                _product_label_for_email(order, pkg),
-                first_code,
-            )
-            send_payment_received_email(
-                to_email=order.buyer_email,
-                order_id=order.id,
-                product=_product_label_for_email(order, pkg) if pkg else None,
-                license_code=first_code,
-            )
-            logger.info("EMAIL: OK (idempotent) order_id=%s to=%s", order.id, order.buyer_email)
-        except Exception as e:
-            logger.exception("EMAIL: FAILED (idempotent) order_id=%s err=%s", order.id, str(e))
-
+        _send_payment_email_safe(
+            order=order,
+            product=_product_label_for_email(order, pkg) if pkg else None,
+            license_code=first_code,
+        )
         return {"ok": True, "status": "already_fulfilled", "licenses": [x.code for x in existing]}
 
     partner = _get_active_partner_by_code(db, order.referral_code)
 
-    # ✅ usa la tabella packages (FK)
+    # usa la tabella packages (FK)
     pkg = _load_package(db, order)
 
     # mapping license_type
@@ -217,12 +218,14 @@ def fulfill_paid_order(
     max_guests = int(pkg.max_guests or 0)
     num_licenses_per_unit = int(pkg.num_licenses or 1)
     units = int(order.quantity or 1)
+
     total_licenses_to_create = units * num_licenses_per_unit
 
     # prezzi + costi
     subtotal = money2(Decimal(str(pkg.price)) * Decimal(units))
-    discount = _calc_partner_discount(subtotal, partner, order, pkg)
+    discount = _calc_partner_discount(subtotal=subtotal, partner=partner, order=order)
     total = money2(subtotal - discount)
+
     est_cost = estimate_agora_cost_for_n_licenses(total_licenses_to_create, max_guests)
 
     # aggiorna breakdown ordine
@@ -230,11 +233,11 @@ def fulfill_paid_order(
     order.discount_amount = discount
     order.total_amount = total
     order.estimated_agora_cost = est_cost
-    if partner:
+    if partner and order.order_type != OrderType.PACKAGE_SCHOOL:
         order.partner_id = partner.id
 
-    # partner payout
-    if partner:
+    # partner payout (non per SCHOOL)
+    if partner and order.order_type != OrderType.PACKAGE_SCHOOL:
         try:
             payout_amount = money2((total * Decimal(str(partner.commission_pct))) / Decimal("100"))
             payout = PartnerPayout(
@@ -244,61 +247,38 @@ def fulfill_paid_order(
                 paid=False,
             )
             db.add(payout)
-        except Exception as e:
-            logger.exception("Partner payout creation FAILED order_id=%s err=%s", order.id, str(e))
+        except Exception:
+            logger.exception("Partner payout creation failed for order_id=%s", order.id)
 
+    # crea licenze
     created_codes: list[str] = []
+    for _ in range(total_licenses_to_create):
+        code = generate_license_code()
 
-    # crea licenze (se AirLink fallisce, rollback DB)
-    try:
-        for _ in range(total_licenses_to_create):
-            code = generate_license_code()
+        _airlink_create_license(
+            code=code,
+            max_listeners=max_guests,
+            duration_minutes=STANDARD_TOUR_MINUTES,
+        )
 
-            _airlink_create_license(
-                code=code,
-                max_listeners=max_guests,
-                duration_minutes=STANDARD_TOUR_MINUTES,
-            )
+        lic = License(
+            code=code,
+            license_type=license_type,
+            max_guests=max_guests,
+            order_id=order.id,
+        )
+        db.add(lic)
+        created_codes.append(code)
 
-            lic = License(
-                code=code,
-                license_type=license_type,
-                max_guests=max_guests,
-                order_id=order.id,
-            )
-            db.add(lic)
-            created_codes.append(code)
-
-        db.add(order)
-        db.commit()
-        db.refresh(order)
-
-    except Exception as e:
-        db.rollback()
-        logger.exception("FULFILLMENT FAILED order_id=%s err=%s", order.id, str(e))
-        raise
+    db.add(order)
+    db.commit()
+    db.refresh(order)
 
     # email (primo codice)
-    try:
-        product_label = _product_label_for_email(order, pkg)
-        first_code = (created_codes[0] if created_codes else None)
-
-        logger.info(
-            "EMAIL: send_payment_received_email START order_id=%s to=%s product=%s license_code=%s",
-            order.id,
-            order.buyer_email,
-            product_label,
-            first_code,
-        )
-        send_payment_received_email(
-            to_email=order.buyer_email,
-            order_id=order.id,
-            product=product_label,
-            license_code=first_code,
-        )
-        logger.info("EMAIL: OK order_id=%s to=%s", order.id, order.buyer_email)
-
-    except Exception as e:
-        logger.exception("EMAIL: FAILED order_id=%s err=%s", order.id, str(e))
+    _send_payment_email_safe(
+        order=order,
+        product=_product_label_for_email(order, pkg),
+        license_code=(created_codes[0] if created_codes else None),
+    )
 
     return {"ok": True, "status": "fulfilled", "licenses": created_codes}
