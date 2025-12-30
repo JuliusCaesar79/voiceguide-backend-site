@@ -94,9 +94,13 @@ def _normalize_product_code(raw: Optional[str]) -> str:
     Normalizza product code proveniente dal sito.
 
     Esempi accettati:
-      - single_25 / SINGLE_25 / Single-25  -> SINGLE_25
-      - package_to_10 / PACKAGE-TO-10      -> PACKAGE_TO_10
-      - package_school_5 / PACKAGE-SCHOOL-5-> PACKAGE_SCHOOL_5
+      - single_25 / SINGLE_25 / Single-25           -> SINGLE_25
+      - package_to_10 / PACKAGE-TO-10              -> PACKAGE_TO_10
+      - package_school_5 / PACKAGE-SCHOOL-5        -> PACKAGE_SCHOOL_5
+
+    ✅ FIX: accetta anche i codici "PACK_TO_10" / "PACK_SCHOOL_5"
+      - pack_to_10 / PACK_TO_10 -> PACKAGE_TO_10
+      - pack_school_5           -> PACKAGE_SCHOOL_5
     """
     if not raw:
         return ""
@@ -106,6 +110,13 @@ def _normalize_product_code(raw: Optional[str]) -> str:
     s = s.strip("_")
     s = s.upper()
 
+    # ✅ compatibilità con frontend che usa "PACK_*"
+    # PACK_TO_10 -> PACKAGE_TO_10
+    # PACK_SCHOOL_5 -> PACKAGE_SCHOOL_5
+    if s.startswith("PACK_"):
+        s = "PACKAGE_" + s[len("PACK_") :]
+
+    # gestioni "SINGLE10" / "PACKAGE_TO10" ecc.
     m = re.fullmatch(r"SINGLE(\d+)", s)
     if m:
         s = f"SINGLE_{m.group(1)}"
@@ -222,11 +233,11 @@ def _require_package_model() -> None:
 def _resolve_single_package_id(db: Session, max_guests: int) -> int:
     """
     FIX CRITICO:
-    Prima cercavamo solo max_guests==X e poteva prendere TO/SCHOOL con stessi max_guests.
-    Ora filtriamo anche:
+    Filtra:
       - package_type == 'SINGLE'
       - num_licenses == 1
       - is_active == True (se presente)
+      - max_guests == X
     """
     _require_package_model()
 
@@ -296,10 +307,12 @@ def _load_package(db: Session, package_id: int) -> Any:
     return row
 
 
-def _calc_amounts_from_db(db: Session, package_id: int, units: int, partner_code: Optional[str]) -> Tuple[Decimal, Decimal, Decimal]:
+def _calc_amounts_from_db(
+    db: Session, package_id: int, units: int, partner_code: Optional[str]
+) -> Tuple[Decimal, Decimal, Decimal]:
     """
     Prezzi = SEMPRE dal DB (packages.price).
-    units = quantità di pacchetti acquistati (di solito 1 per i tuoi codici).
+    units = quantità di pacchetti acquistati (di solito 1).
     """
     pkg = _load_package(db, package_id)
 
@@ -324,10 +337,9 @@ def _parse_product_to_order_fields(db: Session, product: str) -> Tuple[OrderType
     """
     Ritorna: (order_type, package_id, quantity_units)
 
-    NOTA:
-    - Per SINGLE_X: quantity_units = 1 e package_id = riga SINGLE coerente
-    - Per PACKAGE_TO_X: quantity_units = 1 e package_id = riga TO con num_licenses = X
-    - Per PACKAGE_SCHOOL_X: idem
+    - SINGLE_X: package_type=SINGLE, num_licenses=1, max_guests=X
+    - PACKAGE_TO_X: package_type=TO, num_licenses=X
+    - PACKAGE_SCHOOL_X: package_type=SCHOOL, num_licenses=X
     """
     prod = _normalize_product_code(product)
 
@@ -398,10 +410,8 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
     if not resolved_product:
         raise HTTPException(status_code=400, detail="Invalid product")
 
-    # ✅ package_id corretto (fix SINGLE_25 che prendeva TO_119)
     order_type, package_id, quantity = _parse_product_to_order_fields(db, resolved_product)
 
-    # ✅ prezzi dal DB (packages.price)
     subtotal, discount, total = _calc_amounts_from_db(
         db=db,
         package_id=package_id,
@@ -462,7 +472,7 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
         "discount_applied": float(discount),
         "checkout_url": checkout_url,
         "resolved_product": resolved_product,
-        "package_id": package_id,  # ✅ debug utile
+        "package_id": package_id,
         "total_amount": float(total),
     }
 
@@ -517,9 +527,7 @@ def create_stripe_checkout_session(payload: StripeSessionIn, db: Session = Depen
                     "quantity": 1,
                 }
             ],
-            metadata={
-                "order_id": str(order.id),
-            },
+            metadata={"order_id": str(order.id)},
             success_url=success_url,
             cancel_url=cancel_url,
         )
