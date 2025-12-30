@@ -18,7 +18,7 @@ from app.email_service import send_order_received_email
 from models.orders import Order, OrderType, PaymentMethod, PaymentStatus
 from models.order_billing_details import OrderBillingDetails
 
-# ⬇️ Proviamo a importare Package (se esiste nel progetto)
+# ⬇️ Import Package (tabella packages)
 try:
     from models.packages import Package  # type: ignore
 except Exception:  # pragma: no cover
@@ -71,7 +71,7 @@ class CheckoutIntent(BaseModel):
     customer: Customer
     invoice: Optional[Invoice] = None
 
-    # ✅ i18n + redirect (nuovi, retrocompatibili)
+    # ✅ i18n + redirect (retrocompatibili)
     lang: Optional[str] = "it"
     success_url: Optional[AnyHttpUrl] = None
     cancel_url: Optional[AnyHttpUrl] = None
@@ -97,12 +97,6 @@ def _normalize_product_code(raw: Optional[str]) -> str:
       - single_25 / SINGLE_25 / Single-25  -> SINGLE_25
       - package_to_10 / PACKAGE-TO-10      -> PACKAGE_TO_10
       - package_school_5 / PACKAGE-SCHOOL-5-> PACKAGE_SCHOOL_5
-
-    Regole:
-      - trim
-      - lower -> poi upper
-      - separatori '-' e spazi -> '_'
-      - collassa '_' multipli
     """
     if not raw:
         return ""
@@ -112,8 +106,6 @@ def _normalize_product_code(raw: Optional[str]) -> str:
     s = s.strip("_")
     s = s.upper()
 
-    # Normalizza prefissi più comuni (accetta anche "SINGLE25" o "SINGLE-25" già gestito sopra)
-    # Se arriva "SINGLE25" senza underscore:
     m = re.fullmatch(r"SINGLE(\d+)", s)
     if m:
         s = f"SINGLE_{m.group(1)}"
@@ -130,17 +122,12 @@ def _normalize_product_code(raw: Optional[str]) -> str:
 
 
 def _normalize_country_iso2(raw: Optional[str], fallback: Optional[str] = None) -> Optional[str]:
-    """
-    Nel DB usiamo ISO2 (2 lettere).
-    Se arriva 'Italy' o 'Germany' dal sito, prendiamo le prime 2 lettere e upper.
-    (Per ora va bene per test; poi metteremo dropdown ISO2 sul sito.)
-    """
     if raw is None:
         return fallback
     s = str(raw).strip()
     if not s:
         return fallback
-    s2 = "".join([c for c in s if c.isalpha()])  # solo lettere
+    s2 = "".join([c for c in s if c.isalpha()])
     if len(s2) < 2:
         return fallback
     return s2[:2].upper()
@@ -215,30 +202,113 @@ def _save_billing_from_invoice(db: Session, order_id: int, invoice: Invoice) -> 
     db.add(bd)
 
 
-# -------------------------------------------------
-# Pricing (hardcoded)
-# -------------------------------------------------
-# ✅ IMPORTANTISSIMO: qui matchiamo SEMPRE sul code NORMALIZZATO (SINGLE_25 etc.)
-PRODUCT_PRICING: Dict[str, Tuple[OrderType, Optional[int], int, Decimal]] = {
-    "SINGLE_10": (OrderType.SINGLE, None, 1, Decimal("7.99")),
-    "SINGLE_25": (OrderType.SINGLE, None, 1, Decimal("14.99")),
-    "SINGLE_35": (OrderType.SINGLE, None, 1, Decimal("19.99")),
-    "SINGLE_100": (OrderType.SINGLE, None, 1, Decimal("49.99")),
-    # (Se vuoi, aggiungiamo qui anche PACKAGE_TO_* e PACKAGE_SCHOOL_* con prezzi)
-}
-
-
 def _money2(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def _calc_amounts(product: str, partner_code: Optional[str]) -> Tuple[OrderType, Optional[int], int, Decimal, Decimal, Decimal]:
-    key = _normalize_product_code(product)
-    if key not in PRODUCT_PRICING:
-        raise HTTPException(status_code=400, detail=f"Invalid product: {product}")
+def _eur_to_cents(amount_eur: Decimal) -> int:
+    a = _money2(amount_eur)
+    return int((a * 100).to_integral_value(rounding=ROUND_HALF_UP))
 
-    order_type, package_id, quantity, unit_price = PRODUCT_PRICING[key]
-    subtotal = _money2(unit_price * Decimal(quantity))
+
+# -------------------------------------------------
+# Package resolvers (DB-driven)
+# -------------------------------------------------
+def _require_package_model() -> None:
+    if Package is None:
+        raise HTTPException(status_code=500, detail="Package model not available.")
+
+
+def _resolve_single_package_id(db: Session, max_guests: int) -> int:
+    """
+    FIX CRITICO:
+    Prima cercavamo solo max_guests==X e poteva prendere TO/SCHOOL con stessi max_guests.
+    Ora filtriamo anche:
+      - package_type == 'SINGLE'
+      - num_licenses == 1
+      - is_active == True (se presente)
+    """
+    _require_package_model()
+
+    q = db.query(Package)
+
+    if hasattr(Package, "package_type"):
+        q = q.filter(getattr(Package, "package_type") == "SINGLE")
+
+    if hasattr(Package, "num_licenses"):
+        q = q.filter(getattr(Package, "num_licenses") == 1)
+
+    if hasattr(Package, "is_active"):
+        q = q.filter(getattr(Package, "is_active") == True)  # noqa
+
+    if hasattr(Package, "max_guests"):
+        q = q.filter(getattr(Package, "max_guests") == max_guests)
+    else:
+        raise HTTPException(status_code=500, detail="packages missing max_guests column.")
+
+    row = q.first()
+    if not row:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Missing packages row for SINGLE_{max_guests} (package_type=SINGLE, num_licenses=1).",
+        )
+    return int(getattr(row, "id"))
+
+
+def _resolve_package_id_by_type_and_num_licenses(db: Session, package_type: str, num_licenses: int) -> int:
+    """
+    Per PACKAGE_TO_X e PACKAGE_SCHOOL_X:
+      - package_type == 'TO' / 'SCHOOL'
+      - num_licenses == X
+      - is_active == True (se presente)
+    """
+    _require_package_model()
+
+    q = db.query(Package)
+
+    if hasattr(Package, "package_type"):
+        q = q.filter(getattr(Package, "package_type") == package_type)
+
+    if hasattr(Package, "num_licenses"):
+        q = q.filter(getattr(Package, "num_licenses") == int(num_licenses))
+    else:
+        raise HTTPException(status_code=500, detail="packages missing num_licenses column.")
+
+    if hasattr(Package, "is_active"):
+        q = q.filter(getattr(Package, "is_active") == True)  # noqa
+
+    row = q.first()
+    if not row:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Missing packages row for {package_type} num_licenses={num_licenses}.",
+        )
+    return int(getattr(row, "id"))
+
+
+def _load_package(db: Session, package_id: int) -> Any:
+    _require_package_model()
+    row = db.query(Package).filter(getattr(Package, "id") == int(package_id)).first()
+    if not row:
+        raise HTTPException(status_code=500, detail=f"Package not found (id={package_id}).")
+    if hasattr(row, "is_active") and row.is_active is False:
+        raise HTTPException(status_code=500, detail=f"Package id={package_id} is not active.")
+    return row
+
+
+def _calc_amounts_from_db(db: Session, package_id: int, units: int, partner_code: Optional[str]) -> Tuple[Decimal, Decimal, Decimal]:
+    """
+    Prezzi = SEMPRE dal DB (packages.price).
+    units = quantità di pacchetti acquistati (di solito 1 per i tuoi codici).
+    """
+    pkg = _load_package(db, package_id)
+
+    try:
+        unit_price = Decimal(str(getattr(pkg, "price")))
+    except Exception:
+        raise HTTPException(status_code=500, detail=f"Invalid packages.price for id={package_id}")
+
+    subtotal = _money2(unit_price * Decimal(int(units)))
 
     discount_rate = Decimal("0.05") if (partner_code and str(partner_code).strip()) else Decimal("0.00")
     discount = _money2(subtotal * discount_rate)
@@ -247,46 +317,18 @@ def _calc_amounts(product: str, partner_code: Optional[str]) -> Tuple[OrderType,
     if total <= Decimal("0.00"):
         raise HTTPException(status_code=400, detail="Total amount must be > 0")
 
-    return order_type, package_id, quantity, subtotal, discount, total
+    return subtotal, discount, total
 
 
-def _eur_to_cents(amount_eur: Decimal) -> int:
-    a = _money2(amount_eur)
-    return int((a * 100).to_integral_value(rounding=ROUND_HALF_UP))
-
-
-def _resolve_single_package_id(db: Session, max_guests: int) -> int:
+def _parse_product_to_order_fields(db: Session, product: str) -> Tuple[OrderType, int, int]:
     """
-    orders.package_id è FK -> packages.id.
-    Quindi NON possiamo mettere 10/25/35/100 direttamente.
-    Cerchiamo in packages una riga con max_guests = X (o equivalente).
+    Ritorna: (order_type, package_id, quantity_units)
+
+    NOTA:
+    - Per SINGLE_X: quantity_units = 1 e package_id = riga SINGLE coerente
+    - Per PACKAGE_TO_X: quantity_units = 1 e package_id = riga TO con num_licenses = X
+    - Per PACKAGE_SCHOOL_X: idem
     """
-    if Package is None:
-        raise HTTPException(
-            status_code=500,
-            detail="Package model not available. Cannot resolve package_id for SINGLE products.",
-        )
-
-    q = db.query(Package)
-    if hasattr(Package, "max_guests"):
-        row = q.filter(getattr(Package, "max_guests") == max_guests).first()
-    elif hasattr(Package, "guests"):
-        row = q.filter(getattr(Package, "guests") == max_guests).first()
-    elif hasattr(Package, "capacity"):
-        row = q.filter(getattr(Package, "capacity") == max_guests).first()
-    else:
-        row = None
-
-    if not row:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Missing packages row for SINGLE_{max_guests}. Seed table 'packages' (max_guests={max_guests}).",
-        )
-
-    return int(getattr(row, "id"))
-
-
-def _parse_product_to_order_fields(db: Session, product: str) -> Tuple[OrderType, Optional[int], int]:
     prod = _normalize_product_code(product)
 
     if prod.startswith("SINGLE_"):
@@ -300,22 +342,21 @@ def _parse_product_to_order_fields(db: Session, product: str) -> Tuple[OrderType
 
     if prod.startswith("PACKAGE_TO_"):
         try:
-            qty = int(prod.split("_")[-1])
+            nl = int(prod.split("_")[-1])
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid product PACKAGE_TO_x")
-        return (OrderType.PACKAGE_TO, None, qty)
+
+        package_id = _resolve_package_id_by_type_and_num_licenses(db, package_type="TO", num_licenses=nl)
+        return (OrderType.PACKAGE_TO, package_id, 1)
 
     if prod.startswith("PACKAGE_SCHOOL_"):
         try:
-            qty = int(prod.split("_")[-1])
+            nl = int(prod.split("_")[-1])
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid product PACKAGE_SCHOOL_x")
-        return (OrderType.PACKAGE_SCHOOL, None, qty)
 
-    key = prod
-    if key in PRODUCT_PRICING:
-        ot, pid, qty, _ = PRODUCT_PRICING[key]
-        return ot, pid, qty
+        package_id = _resolve_package_id_by_type_and_num_licenses(db, package_type="SCHOOL", num_licenses=nl)
+        return (OrderType.PACKAGE_SCHOOL, package_id, 1)
 
     raise HTTPException(status_code=400, detail=f"Invalid product: {product}")
 
@@ -357,12 +398,16 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
     if not resolved_product:
         raise HTTPException(status_code=400, detail="Invalid product")
 
-    _, _, _, subtotal, discount, total = _calc_amounts(
-        product=resolved_product,
+    # ✅ package_id corretto (fix SINGLE_25 che prendeva TO_119)
+    order_type, package_id, quantity = _parse_product_to_order_fields(db, resolved_product)
+
+    # ✅ prezzi dal DB (packages.price)
+    subtotal, discount, total = _calc_amounts_from_db(
+        db=db,
+        package_id=package_id,
+        units=quantity,
         partner_code=data.customer.partner_code,
     )
-
-    order_type, package_id, quantity = _parse_product_to_order_fields(db, resolved_product)
 
     order = Order(
         buyer_email=data.customer.email.strip(),
@@ -378,7 +423,6 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
 
         estimated_agora_cost=None,
 
-        # ✅ coerente con lo schema Stripe: ordine PENDING ma metodo STRIPE
         payment_method=PaymentMethod.STRIPE,
         payment_status=PaymentStatus.PENDING,
 
@@ -404,7 +448,7 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
         send_order_received_email(
             to_email=order.buyer_email,
             order_id=order.id,
-            product=resolved_product,  # ✅ usa code normalizzato
+            product=resolved_product,
             invoice_requested=invoice_requested,
             intestatario=intestatario,
         )
@@ -417,7 +461,9 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
         "order_id": order.id,
         "discount_applied": float(discount),
         "checkout_url": checkout_url,
-        "resolved_product": resolved_product,  # ✅ debug immediato dal sito
+        "resolved_product": resolved_product,
+        "package_id": package_id,  # ✅ debug utile
+        "total_amount": float(total),
     }
 
 
