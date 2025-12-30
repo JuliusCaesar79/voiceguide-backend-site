@@ -500,17 +500,29 @@ def send_trial_license_email(
 
     _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
 
+
 def send_payment_received_email(
     to_email: str,
     order_id: int,
     product: str | None = None,
     license_code: str | None = None,
+    license_codes: list[str] | None = None,
 ) -> None:
     """
     Email inviata quando Stripe/PayPal conferma il pagamento.
-    (La licenza può essere inclusa se già disponibile.)
+
+    ✅ Supporta sia:
+      - singolo codice: license_code="VG-...."   (retro-compatibilità)
+      - lista codici:  license_codes=[...]       (pacchetti)
     """
     subject = "VoiceGuide — Payment confirmed ✅"
+
+    # Normalizza: se arriva una lista usala; altrimenti fallback al singolo
+    codes: list[str] = []
+    if license_codes:
+        codes = [c.strip() for c in license_codes if (c or "").strip()]
+    elif license_code and license_code.strip():
+        codes = [license_code.strip()]
 
     lines = [
         "Hello,",
@@ -521,8 +533,10 @@ def send_payment_received_email(
     ]
     if product:
         lines.append(f"Product: {product}")
-    if license_code:
-        lines += ["", "Your license code:", license_code]
+
+    if codes:
+        lines += ["", "Your license code(s):"]
+        lines += [f"- {c}" for c in codes]
 
     lines += [
         "",
@@ -533,12 +547,27 @@ def send_payment_received_email(
     ]
     text_body = "\n".join(lines)
 
+    # HTML: blocco copiabile + (opzionale) lista
     license_html = ""
-    if license_code:
+    if codes:
+        safe_codes_text = "\n".join(codes)
+        safe_codes_pre = escape(safe_codes_text)
+
+        lis = "\n".join([f"<li style='margin:4px 0;'><code>{escape(c)}</code></li>" for c in codes])
+
         license_html = f"""
         <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
-          <div style="font-size:12px;color:#666;margin-bottom:6px;">Your License Code</div>
-          <div style="font-size:22px;letter-spacing:1px;"><b>{escape(license_code)}</b></div>
+          <div style="font-size:12px;color:#666;margin-bottom:10px;">Your License Code(s)</div>
+
+          <div style="margin-bottom:10px;">
+            <div style="font-size:12px;color:#666;margin-bottom:6px;">Copy &amp; paste</div>
+            <pre style="margin:0;padding:12px;border-radius:10px;background:#fafafa;border:1px solid #eee;white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.5;">{safe_codes_pre}</pre>
+          </div>
+
+          <div style="font-size:12px;color:#666;margin:12px 0 6px 0;">List</div>
+          <ul style="margin:0;padding-left:18px;">
+            {lis}
+          </ul>
         </div>
         """.strip()
 

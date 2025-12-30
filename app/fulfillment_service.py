@@ -140,23 +140,32 @@ def _load_package(db: Session, order: Order) -> Package:
     return pkg
 
 
-def _send_payment_email_safe(*, order: Order, product: Optional[str], license_code: Optional[str]) -> None:
+def _send_payment_email_safe(
+    *,
+    order: Order,
+    product: Optional[str],
+    license_code: Optional[str],
+    license_codes: Optional[list[str]],
+) -> None:
     """
     Wrapper con log espliciti (così su Railway vedi chiaramente cosa succede).
+    ✅ Ora supporta invio multi-licenza.
     """
     try:
         logger.info(
-            "EMAIL: send_payment_received_email START order_id=%s to=%s product=%s license_code=%s",
+            "EMAIL: send_payment_received_email START order_id=%s to=%s product=%s first_code=%s codes_count=%s",
             order.id,
             order.buyer_email,
             product,
             license_code,
+            (len(license_codes) if license_codes else 0),
         )
         send_payment_received_email(
             to_email=order.buyer_email,
             order_id=order.id,
             product=product,
-            license_code=license_code,
+            license_code=license_code,      # retro-compatibilità
+            license_codes=license_codes,    # ✅ multi
         )
         logger.info("EMAIL: OK order_id=%s to=%s", order.id, order.buyer_email)
     except Exception as e:
@@ -174,7 +183,7 @@ def fulfill_paid_order(
     - se esistono già licenze per order_id -> non rigenerare (webhook può arrivare più volte)
     - crea licenza/e su AirLink
     - salva license/e su DB Site
-    - invia email Payment confirmed (con primo codice)
+    - invia email Payment confirmed (✅ ora con lista codici completa)
     """
     if order.payment_status != PaymentStatus.PAID:
         raise RuntimeError("Order is not PAID. Refusing fulfillment.")
@@ -187,18 +196,22 @@ def fulfill_paid_order(
         .all()
     )
     if existing:
-        first_code = existing[0].code if existing else None
+        all_codes = [x.code for x in existing]
+        first_code = all_codes[0] if all_codes else None
+
         pkg = None
         try:
             pkg = _load_package(db, order)
         except Exception:
             pkg = None
+
         _send_payment_email_safe(
             order=order,
             product=_product_label_for_email(order, pkg) if pkg else None,
             license_code=first_code,
+            license_codes=all_codes,  # ✅ invia tutti i codici anche in retry
         )
-        return {"ok": True, "status": "already_fulfilled", "licenses": [x.code for x in existing]}
+        return {"ok": True, "status": "already_fulfilled", "licenses": all_codes}
 
     partner = _get_active_partner_by_code(db, order.referral_code)
 
@@ -274,11 +287,12 @@ def fulfill_paid_order(
     db.commit()
     db.refresh(order)
 
-    # email (primo codice)
+    # ✅ email: invio lista completa (e primo codice per compat)
     _send_payment_email_safe(
         order=order,
         product=_product_label_for_email(order, pkg),
         license_code=(created_codes[0] if created_codes else None),
+        license_codes=created_codes,
     )
 
     return {"ok": True, "status": "fulfilled", "licenses": created_codes}
