@@ -17,6 +17,12 @@ from models.partners import Partner
 from models.partner_payouts import PartnerPayout
 from models.packages import Package  # ✅
 
+# ✅ Billing details (email sta qui, NON in orders)
+try:
+    from models.order_billing_details import OrderBillingDetails  # type: ignore
+except Exception:
+    OrderBillingDetails = None  # type: ignore
+
 from app.email_service import send_payment_received_email
 
 logger = logging.getLogger(__name__)
@@ -134,11 +140,45 @@ def _load_package(db: Session, order: Order) -> Package:
     return pkg
 
 
+def _safe_get_email_from_billing_details(db: Session, order_id: int) -> Optional[str]:
+    """
+    In questo progetto l'email NON è in orders: sta in order_billing_details.
+    Recuperiamo in modo robusto il campo email (qualunque sia il nome effettivo).
+    """
+    if not OrderBillingDetails:
+        return None
+
+    bd = db.query(OrderBillingDetails).filter(OrderBillingDetails.order_id == order_id).first()
+    if not bd:
+        return None
+
+    # Possibili nomi campo (robusto)
+    for attr in ("buyer_email", "email", "customer_email", "contact_email", "billing_email"):
+        if hasattr(bd, attr):
+            val = getattr(bd, attr)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+    return None
+
+
+def _resolve_buyer_email(db: Session, order: Order) -> Optional[str]:
+    """
+    Prima prova eventuali attributi in Order (se esistono),
+    poi fallback su order_billing_details.
+    """
+    for attr in ("buyer_email", "email", "customer_email", "contact_email"):
+        if hasattr(order, attr):
+            val = getattr(order, attr)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+    return _safe_get_email_from_billing_details(db, order.id)
+
+
 def fulfill_paid_order(
     *,
     db: Session,
     order: Order,
-    stripe_session: Optional[dict[str, Any]] = None,  # ✅ accetta stripe_session
+    stripe_session: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """
     Fulfillment idempotente:
@@ -150,19 +190,25 @@ def fulfill_paid_order(
     if order.payment_status != PaymentStatus.PAID:
         raise RuntimeError("Order is not PAID. Refusing fulfillment.")
 
+    buyer_email = _resolve_buyer_email(db, order)
+    if not buyer_email:
+        # Non blocchiamo la creazione licenze, ma logghiamo forte: senza email non possiamo inviare.
+        logger.error("[fulfillment] Missing buyer email for order_id=%s (check order_billing_details)", order.id)
+
     # idempotenza
     existing = db.query(License).filter(License.order_id == order.id).order_by(License.id.asc()).all()
     if existing:
         first_code = existing[0].code if existing else None
-        try:
-            send_payment_received_email(
-                to_email=order.buyer_email,
-                order_id=order.id,
-                product=None,
-                license_code=first_code,
-            )
-        except Exception:
-            pass
+        if buyer_email:
+            try:
+                send_payment_received_email(
+                    to_email=buyer_email,
+                    order_id=order.id,
+                    product=None,
+                    license_code=first_code,
+                )
+            except Exception:
+                logger.exception("[fulfillment] send_payment_received_email failed (already_fulfilled) order_id=%s", order.id)
         return {"ok": True, "status": "already_fulfilled", "licenses": [x.code for x in existing]}
 
     partner = _get_active_partner_by_code(db, order.referral_code)
@@ -186,7 +232,7 @@ def fulfill_paid_order(
 
     total_licenses_to_create = units * num_licenses_per_unit
 
-    # prezzi + costi
+    # prezzi + costi (questi servono per stats/admin; non dipendono dall'email)
     subtotal = money2(Decimal(str(pkg.price)) * Decimal(units))
     discount = _calc_partner_discount(subtotal, partner)
     total = money2(subtotal - discount)
@@ -194,10 +240,13 @@ def fulfill_paid_order(
     est_cost = estimate_agora_cost_for_n_licenses(total_licenses_to_create, max_guests)
 
     # aggiorna breakdown ordine
-    order.subtotal_amount = subtotal
-    order.discount_amount = discount
+    if hasattr(order, "subtotal_amount"):
+        order.subtotal_amount = subtotal
+    if hasattr(order, "discount_amount"):
+        order.discount_amount = discount
     order.total_amount = total
-    order.estimated_agora_cost = est_cost
+    if hasattr(order, "estimated_agora_cost"):
+        order.estimated_agora_cost = est_cost
     if partner:
         order.partner_id = partner.id
 
@@ -213,7 +262,7 @@ def fulfill_paid_order(
             )
             db.add(payout)
         except Exception:
-            pass
+            logger.exception("[fulfillment] partner payout create failed order_id=%s partner_id=%s", order.id, partner.id)
 
     # crea licenze
     created_codes: list[str] = []
@@ -240,14 +289,15 @@ def fulfill_paid_order(
     db.refresh(order)
 
     # email (primo codice)
-    try:
-        send_payment_received_email(
-            to_email=order.buyer_email,
-            order_id=order.id,
-            product=_product_label_for_email(order, pkg),
-            license_code=(created_codes[0] if created_codes else None),
-        )
-    except Exception:
-        pass
+    if buyer_email:
+        try:
+            send_payment_received_email(
+                to_email=buyer_email,
+                order_id=order.id,
+                product=_product_label_for_email(order, pkg),
+                license_code=(created_codes[0] if created_codes else None),
+            )
+        except Exception:
+            logger.exception("[fulfillment] send_payment_received_email failed (fulfilled) order_id=%s", order.id)
 
     return {"ok": True, "status": "fulfilled", "licenses": created_codes}
