@@ -6,6 +6,7 @@ from decimal import Decimal, ROUND_HALF_UP
 import os
 import uuid
 import logging
+import traceback
 from typing import Any, Optional
 
 import requests
@@ -20,6 +21,17 @@ from models.packages import Package  # ✅
 from app.email_service import send_payment_received_email
 
 logger = logging.getLogger(__name__)
+
+# -----------------------------
+# EMAIL DEBUG (stdout logs)
+# -----------------------------
+EMAIL_DEBUG = os.getenv("EMAIL_DEBUG", "1") == "1"
+
+def _email_log(msg: str) -> None:
+    # Railway logs = stdout, quindi print è il più affidabile
+    if EMAIL_DEBUG:
+        print(msg, flush=True)
+
 
 # -----------------------------
 # AGORA COST (internal)
@@ -134,28 +146,22 @@ def _load_package(db: Session, order: Order) -> Package:
     return pkg
 
 
-def _safe_send_payment_email(*, to_email: str, order_id: int, product: Optional[str], license_code: Optional[str]) -> None:
+def _try_send_payment_email(*, order: Order, product: Optional[str], license_code: Optional[str]) -> None:
     """
-    Wrapper: LOGGA SEMPRE l'invio email, e logga l'eccezione se fallisce.
-    Così su Railway vediamo finalmente cosa succede.
+    Wrapper: logga SEMPRE su Railway cosa succede durante l'invio email.
     """
+    _email_log(f"EMAIL: send_payment_received_email START order_id={order.id} to={order.buyer_email} product={product} license_code={license_code}")
     try:
-        logger.info(
-            "EMAIL: attempting send_payment_received_email | to=%s | order_id=%s | product=%s | license_code=%s",
-            to_email,
-            order_id,
-            product,
-            license_code,
-        )
         send_payment_received_email(
-            to_email=to_email,
-            order_id=order_id,
+            to_email=order.buyer_email,
+            order_id=order.id,
             product=product,
             license_code=license_code,
         )
-        logger.info("EMAIL: send_payment_received_email DONE | to=%s | order_id=%s", to_email, order_id)
-    except Exception:
-        logger.exception("EMAIL: send_payment_received_email FAILED | to=%s | order_id=%s", to_email, order_id)
+        _email_log(f"EMAIL: OK order_id={order.id} to={order.buyer_email}")
+    except Exception as e:
+        _email_log(f"EMAIL: FAIL order_id={order.id} to={order.buyer_email} err={repr(e)}")
+        _email_log("EMAIL: TRACEBACK\n" + traceback.format_exc())
 
 
 def fulfill_paid_order(
@@ -178,15 +184,8 @@ def fulfill_paid_order(
     existing = db.query(License).filter(License.order_id == order.id).order_by(License.id.asc()).all()
     if existing:
         first_code = existing[0].code if existing else None
-
-        # ✅ ora logghiamo sempre
-        _safe_send_payment_email(
-            to_email=order.buyer_email,
-            order_id=order.id,
-            product=None,
-            license_code=first_code,
-        )
-
+        # ✅ ora logga SEMPRE l'esito
+        _try_send_payment_email(order=order, product=None, license_code=first_code)
         return {"ok": True, "status": "already_fulfilled", "licenses": [x.code for x in existing]}
 
     partner = _get_active_partner_by_code(db, order.referral_code)
@@ -237,7 +236,8 @@ def fulfill_paid_order(
             )
             db.add(payout)
         except Exception:
-            logger.exception("Partner payout creation failed for order_id=%s partner_id=%s", order.id, partner.id)
+            # qui lasciamo così per ora (non blocca fulfillment)
+            pass
 
     # crea licenze
     created_codes: list[str] = []
@@ -263,10 +263,9 @@ def fulfill_paid_order(
     db.commit()
     db.refresh(order)
 
-    # ✅ email (primo codice) - ora con log visibile su Railway
-    _safe_send_payment_email(
-        to_email=order.buyer_email,
-        order_id=order.id,
+    # email (primo codice) ✅ ora logga SEMPRE l'esito
+    _try_send_payment_email(
+        order=order,
         product=_product_label_for_email(order, pkg),
         license_code=(created_codes[0] if created_codes else None),
     )
