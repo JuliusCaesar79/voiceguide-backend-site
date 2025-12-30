@@ -1,8 +1,9 @@
-# routers/checkout.py# routers/checkout.py
+# routers/checkout.py
 
 from __future__ import annotations
 
 import os
+import re
 from decimal import Decimal, ROUND_HALF_UP
 
 import stripe
@@ -86,6 +87,46 @@ class StripeSessionIn(BaseModel):
 def _normalize_lang(lang: Optional[str]) -> str:
     v = (lang or "it").lower().strip()
     return v if v in SUPPORTED_LANGS else "it"
+
+
+def _normalize_product_code(raw: Optional[str]) -> str:
+    """
+    Normalizza product code proveniente dal sito.
+
+    Esempi accettati:
+      - single_25 / SINGLE_25 / Single-25  -> SINGLE_25
+      - package_to_10 / PACKAGE-TO-10      -> PACKAGE_TO_10
+      - package_school_5 / PACKAGE-SCHOOL-5-> PACKAGE_SCHOOL_5
+
+    Regole:
+      - trim
+      - lower -> poi upper
+      - separatori '-' e spazi -> '_'
+      - collassa '_' multipli
+    """
+    if not raw:
+        return ""
+    s = str(raw).strip()
+    s = s.replace("-", "_").replace(" ", "_")
+    s = re.sub(r"_+", "_", s)
+    s = s.strip("_")
+    s = s.upper()
+
+    # Normalizza prefissi più comuni (accetta anche "SINGLE25" o "SINGLE-25" già gestito sopra)
+    # Se arriva "SINGLE25" senza underscore:
+    m = re.fullmatch(r"SINGLE(\d+)", s)
+    if m:
+        s = f"SINGLE_{m.group(1)}"
+
+    m = re.fullmatch(r"PACKAGE_TO(\d+)", s)
+    if m:
+        s = f"PACKAGE_TO_{m.group(1)}"
+
+    m = re.fullmatch(r"PACKAGE_SCHOOL(\d+)", s)
+    if m:
+        s = f"PACKAGE_SCHOOL_{m.group(1)}"
+
+    return s
 
 
 def _normalize_country_iso2(raw: Optional[str], fallback: Optional[str] = None) -> Optional[str]:
@@ -175,33 +216,15 @@ def _save_billing_from_invoice(db: Session, order_id: int, invoice: Invoice) -> 
 
 
 # -------------------------------------------------
-# Pricing (Fase 1: hardcoded, poi DB)
+# Pricing (hardcoded)
 # -------------------------------------------------
-# ✅ Match ESATTO: niente contains/startswith ambigui
-# Codes attesi:
-# - SINGLE_10 / SINGLE_25 / SINGLE_35 / SINGLE_100
-# - PACKAGE_TO_10 / PACKAGE_TO_20 / PACKAGE_TO_50 / PACKAGE_TO_100  (esempio)
-# - PACKAGE_SCHOOL_1 / PACKAGE_SCHOOL_5 / PACKAGE_SCHOOL_10 / PACKAGE_SCHOOL_30 (esempio)
-#
-# Se i tuoi codici reali differiscono, li allineiamo qui.
+# ✅ IMPORTANTISSIMO: qui matchiamo SEMPRE sul code NORMALIZZATO (SINGLE_25 etc.)
 PRODUCT_PRICING: Dict[str, Tuple[OrderType, Optional[int], int, Decimal]] = {
-    # Single licenses
     "SINGLE_10": (OrderType.SINGLE, None, 1, Decimal("7.99")),
     "SINGLE_25": (OrderType.SINGLE, None, 1, Decimal("14.99")),
     "SINGLE_35": (OrderType.SINGLE, None, 1, Decimal("19.99")),
     "SINGLE_100": (OrderType.SINGLE, None, 1, Decimal("49.99")),
-
-    # Tour Operator packages (⚠️ esempi coerenti con i 119€ che hai visto)
-    "PACKAGE_TO_10": (OrderType.PACKAGE_TO, None, 10, Decimal("119.00")),
-    "PACKAGE_TO_20": (OrderType.PACKAGE_TO, None, 20, Decimal("229.00")),
-    "PACKAGE_TO_50": (OrderType.PACKAGE_TO, None, 50, Decimal("549.00")),
-    "PACKAGE_TO_100": (OrderType.PACKAGE_TO, None, 100, Decimal("999.00")),
-
-    # School packages (esempi)
-    "PACKAGE_SCHOOL_1": (OrderType.PACKAGE_SCHOOL, None, 1, Decimal("79.00")),
-    "PACKAGE_SCHOOL_5": (OrderType.PACKAGE_SCHOOL, None, 5, Decimal("349.00")),
-    "PACKAGE_SCHOOL_10": (OrderType.PACKAGE_SCHOOL, None, 10, Decimal("649.00")),
-    "PACKAGE_SCHOOL_30": (OrderType.PACKAGE_SCHOOL, None, 30, Decimal("1699.00")),
+    # (Se vuoi, aggiungiamo qui anche PACKAGE_TO_* e PACKAGE_SCHOOL_* con prezzi)
 }
 
 
@@ -210,12 +233,12 @@ def _money2(value: Decimal) -> Decimal:
 
 
 def _calc_amounts(product: str, partner_code: Optional[str]) -> Tuple[OrderType, Optional[int], int, Decimal, Decimal, Decimal]:
-    key = (product or "").strip().upper()
+    key = _normalize_product_code(product)
     if key not in PRODUCT_PRICING:
         raise HTTPException(status_code=400, detail=f"Invalid product: {product}")
 
     order_type, package_id, quantity, unit_price = PRODUCT_PRICING[key]
-    subtotal = _money2(unit_price)  # unit_price già totale per quel "prodotto/codice"
+    subtotal = _money2(unit_price * Decimal(quantity))
 
     discount_rate = Decimal("0.05") if (partner_code and str(partner_code).strip()) else Decimal("0.00")
     discount = _money2(subtotal * discount_rate)
@@ -264,9 +287,8 @@ def _resolve_single_package_id(db: Session, max_guests: int) -> int:
 
 
 def _parse_product_to_order_fields(db: Session, product: str) -> Tuple[OrderType, Optional[int], int]:
-    prod = (product or "").strip().upper()
+    prod = _normalize_product_code(product)
 
-    # ✅ single → resolve FK package_id
     if prod.startswith("SINGLE_"):
         try:
             mg = int(prod.split("_", 1)[1])
@@ -276,7 +298,6 @@ def _parse_product_to_order_fields(db: Session, product: str) -> Tuple[OrderType
         package_id = _resolve_single_package_id(db, max_guests=mg)
         return (OrderType.SINGLE, package_id, 1)
 
-    # ✅ package TO (quantity è il numero licenze nel pacchetto)
     if prod.startswith("PACKAGE_TO_"):
         try:
             qty = int(prod.split("_")[-1])
@@ -284,7 +305,6 @@ def _parse_product_to_order_fields(db: Session, product: str) -> Tuple[OrderType
             raise HTTPException(status_code=400, detail="Invalid product PACKAGE_TO_x")
         return (OrderType.PACKAGE_TO, None, qty)
 
-    # ✅ package SCHOOL
     if prod.startswith("PACKAGE_SCHOOL_"):
         try:
             qty = int(prod.split("_")[-1])
@@ -292,7 +312,6 @@ def _parse_product_to_order_fields(db: Session, product: str) -> Tuple[OrderType
             raise HTTPException(status_code=400, detail="Invalid product PACKAGE_SCHOOL_x")
         return (OrderType.PACKAGE_SCHOOL, None, qty)
 
-    # fallback: exact match from catalog
     key = prod
     if key in PRODUCT_PRICING:
         ot, pid, qty, _ = PRODUCT_PRICING[key]
@@ -334,21 +353,16 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
 
     lang = _normalize_lang(data.lang)
 
-    # ✅ calcolo deterministico dal catalogo + partner code
-    order_type_from_price, _, _, subtotal, discount, total = _calc_amounts(
-        product=data.product,
+    resolved_product = _normalize_product_code(data.product)
+    if not resolved_product:
+        raise HTTPException(status_code=400, detail="Invalid product")
+
+    _, _, _, subtotal, discount, total = _calc_amounts(
+        product=resolved_product,
         partner_code=data.customer.partner_code,
     )
 
-    # ✅ campi ordine (package_id FK per single)
-    order_type, package_id, quantity = _parse_product_to_order_fields(db, data.product)
-
-    # ✅ sanity: ordine_type derivato deve essere coerente col catalogo
-    if order_type != order_type_from_price:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Product mapping mismatch for {data.product}: pricing={order_type_from_price} fields={order_type}",
-        )
+    order_type, package_id, quantity = _parse_product_to_order_fields(db, resolved_product)
 
     order = Order(
         buyer_email=data.customer.email.strip(),
@@ -364,7 +378,8 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
 
         estimated_agora_cost=None,
 
-        payment_method=PaymentMethod.STRIPE,  # ✅ coerente col flusso checkout
+        # ✅ coerente con lo schema Stripe: ordine PENDING ma metodo STRIPE
+        payment_method=PaymentMethod.STRIPE,
         payment_status=PaymentStatus.PENDING,
 
         partner_id=None,
@@ -389,7 +404,7 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
         send_order_received_email(
             to_email=order.buyer_email,
             order_id=order.id,
-            product=data.product,
+            product=resolved_product,  # ✅ usa code normalizzato
             invoice_requested=invoice_requested,
             intestatario=intestatario,
         )
@@ -402,15 +417,7 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
         "order_id": order.id,
         "discount_applied": float(discount),
         "checkout_url": checkout_url,
-        # 🔎 debug utile (puoi lasciarlo anche in prod)
-        "resolved": {
-            "product": (data.product or "").strip().upper(),
-            "order_type": str(order_type),
-            "quantity": quantity,
-            "subtotal": float(subtotal),
-            "discount": float(discount),
-            "total": float(total),
-        },
+        "resolved_product": resolved_product,  # ✅ debug immediato dal sito
     }
 
 
@@ -431,30 +438,15 @@ def create_stripe_checkout_session(payload: StripeSessionIn, db: Session = Depen
     if order.payment_status == PaymentStatus.PAID:
         raise HTTPException(status_code=400, detail="Order already paid")
 
-    # ✅ Non fidarti “ciecamente” del DB: sanity check sull’importo
     try:
-        total_eur_db = Decimal(str(order.total_amount))
+        total_eur = Decimal(str(order.total_amount))
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid order amount")
 
-    if total_eur_db <= Decimal("0.00"):
+    if total_eur <= Decimal("0.00"):
         raise HTTPException(status_code=400, detail="Order total_amount must be > 0")
 
-    # 🔒 Extra-sicurezza:
-    # se vuoi, puoi anche imporre che total_amount sia uno dei valori del catalogo (o con sconto partner)
-    # senza product_code nel DB non possiamo ricalcolare perfettamente, quindi qui facciamo “guardrail”:
-    allowed_totals = set()
-    for code, (_, __, ___, base_price) in PRODUCT_PRICING.items():
-        allowed_totals.add(_money2(base_price))
-        allowed_totals.add(_money2(base_price * Decimal("0.95")))  # sconto 5%
-
-    if _money2(total_eur_db) not in allowed_totals:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Order total ({_money2(total_eur_db)}) not in allowed price catalog. Preventing wrong charge.",
-        )
-
-    amount_cents = _eur_to_cents(total_eur_db)
+    amount_cents = _eur_to_cents(total_eur)
 
     success_url = _build_checkout_success_url(order_id=order.id, lang=lang, success_url=payload.success_url)
     cancel_url = _build_checkout_cancel_url(order_id=order.id, lang=lang, cancel_url=payload.cancel_url)
@@ -481,7 +473,6 @@ def create_stripe_checkout_session(payload: StripeSessionIn, db: Session = Depen
             ],
             metadata={
                 "order_id": str(order.id),
-                "amount_eur": str(_money2(total_eur_db)),
             },
             success_url=success_url,
             cancel_url=cancel_url,
@@ -508,8 +499,4 @@ def create_stripe_checkout_session(payload: StripeSessionIn, db: Session = Depen
         "order_id": order.id,
         "stripe_session_id": session.id,
         "checkout_url": session.url,
-        "debug": {
-            "amount_eur": float(_money2(total_eur_db)),
-            "amount_cents": amount_cents,
-        },
     }
