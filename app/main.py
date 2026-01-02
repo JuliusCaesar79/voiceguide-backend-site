@@ -18,7 +18,7 @@ from routers import partner_portal, partner_payments_admin, admin_licenses
 from routers import trial_requests, admin_trial_requests
 from routers import admin_partner_requests, partner_requests
 from routers import checkout
-from routers import stripe_webhook  # ✅ NEW
+from routers import stripe_webhook  # ✅ Webhooks Stripe
 
 # ----------------------------------------------------
 # 🚀 FASTAPI APP
@@ -33,14 +33,16 @@ app = FastAPI(
 # ----------------------------------------------------
 cors_env = os.getenv(
     "CORS_ORIGINS",
-    ",".join([
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "https://www.voiceguideapp.com",
-        "https://voiceguideapp.com",
-        "https://voiceguide-admin-production.up.railway.app",
-        "https://voiceguide-partner-production.up.railway.app",
-    ])
+    ",".join(
+        [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "https://www.voiceguideapp.com",
+            "https://voiceguideapp.com",
+            "https://voiceguide-admin-production.up.railway.app",
+            "https://voiceguide-partner-production.up.railway.app",
+        ]
+    ),
 )
 
 origins = [o.strip() for o in cors_env.split(",") if o.strip()]
@@ -54,10 +56,11 @@ app.add_middleware(
 )
 
 # ----------------------------------------------------
-# 🟢 GLOBAL OPTIONS HANDLER (FIX DEFINITIVO)
+# 🟢 OPTIONS HANDLER SOLO PER WEBHOOKS
+# (evita interferenze/405 sul resto delle route)
 # ----------------------------------------------------
-@app.options("/{path:path}")
-async def options_handler(path: str, request: Request):
+@app.options("/webhooks/{path:path}")
+async def options_webhooks(path: str):
     return Response(status_code=204)
 
 # ----------------------------------------------------
@@ -91,7 +94,7 @@ app.include_router(partner_requests.router)
 
 app.include_router(checkout.router)
 
-app.include_router(stripe_webhook.router)  # ✅ NEW (webhooks)
+app.include_router(stripe_webhook.router)  # ✅ webhooks
 
 # ----------------------------------------------------
 # 🏠 BASE
@@ -99,6 +102,7 @@ app.include_router(stripe_webhook.router)  # ✅ NEW (webhooks)
 @app.get("/")
 def root():
     return {"message": "Backend VoiceGuide Sito attivo e pronto!"}
+
 
 @app.get("/health")
 def health():
