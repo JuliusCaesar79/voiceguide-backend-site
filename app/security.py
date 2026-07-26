@@ -1,9 +1,10 @@
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 
 from jose import jwt, JWTError
 
-SECRET_KEY = "VOICEGUIDE_PARTNER_SECRET_2025"  # in produzione va messa in .env
+SECRET_KEY = os.environ["JWT_SECRET_KEY"]
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 ore
 

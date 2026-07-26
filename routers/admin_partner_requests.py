@@ -7,6 +7,7 @@ import uuid
 import logging
 
 from app.db import get_db
+from routers.auth_admin import get_current_admin
 
 from models.partner_requests import (
     PartnerRequest,
@@ -66,6 +67,7 @@ def normalize_tier(tier_obj) -> str:
 def list_partner_requests(
     status: PartnerRequestStatus | None = Query(default=None),
     db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
 ):
     q = db.query(PartnerRequest)
     if status:
@@ -74,7 +76,11 @@ def list_partner_requests(
 
 
 @router.post("/{request_id}/reject", response_model=PartnerRequestOut)
-def reject_partner_request(request_id: int, db: Session = Depends(get_db)):
+def reject_partner_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
     req = db.query(PartnerRequest).filter(PartnerRequest.id == request_id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Request not found.")
@@ -110,6 +116,7 @@ def approve_partner_request(
     tier: str | None = Query(default=None),
     commission_pct: Decimal | None = Query(default=None),
     db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
 ):
     """
     Approva la richiesta e crea un Partner attivo con referral_code.

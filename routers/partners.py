@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from routers.auth_admin import get_current_admin
 from schemas.partners import PartnerCreate, PartnerOut
 from models.partners import Partner, PartnerType
 
@@ -9,7 +10,11 @@ router = APIRouter(prefix="/partners", tags=["Partners"])
 
 
 @router.post("/create", response_model=PartnerOut)
-def create_partner(payload: PartnerCreate, db: Session = Depends(get_db)):
+def create_partner(
+    payload: PartnerCreate,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
 
     # Controllo email duplicata
     existing_email = db.query(Partner).filter(Partner.email == payload.email).first()
@@ -45,5 +50,5 @@ def create_partner(payload: PartnerCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/", response_model=list[PartnerOut])
-def list_partners(db: Session = Depends(get_db)):
+def list_partners(db: Session = Depends(get_db), admin=Depends(get_current_admin)):
     return db.query(Partner).all()
