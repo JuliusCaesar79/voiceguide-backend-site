@@ -12,7 +12,7 @@ from app.db import engine
 from models import Base
 
 # Routers
-from routers import purchase, partners, auth_partner, partner_me
+from routers import purchase, auth_partner
 from routers import auth_admin, admin, payouts_admin, admin_partners
 from routers import partner_portal, partner_payments_admin, admin_licenses
 from routers import trial_requests, admin_trial_requests
@@ -73,9 +73,7 @@ if os.getenv("ENV", "dev") == "dev" and os.getenv("DB_AUTO_CREATE") == "1":
 # 🔌 ROUTERS
 # ----------------------------------------------------
 app.include_router(purchase.router)
-app.include_router(partners.router)
 app.include_router(auth_partner.router)
-app.include_router(partner_me.router)
 
 app.include_router(auth_admin.router)
 app.include_router(admin.router)
