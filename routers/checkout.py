@@ -17,6 +17,8 @@ from app.db import get_db
 from app.email_service import send_order_received_email
 from models.orders import Order, OrderType, PaymentMethod, PaymentStatus
 from models.order_billing_details import OrderBillingDetails
+from models.partners import Partner
+from routers.purchase import get_active_partner_by_code
 
 # ⬇️ Import Package (tabella packages)
 try:
@@ -308,11 +310,14 @@ def _load_package(db: Session, package_id: int) -> Any:
 
 
 def _calc_amounts_from_db(
-    db: Session, package_id: int, units: int, partner_code: Optional[str]
+    db: Session, package_id: int, units: int, order_type: OrderType, partner: Optional[Partner]
 ) -> Tuple[Decimal, Decimal, Decimal]:
     """
     Prezzi = SEMPRE dal DB (packages.price).
     units = quantità di pacchetti acquistati (di solito 1).
+    Sconto 5% SOLO se `partner` è un Partner reale e attivo (vedi
+    get_active_partner_by_code) - non applicato ai pacchetti SCHOOL,
+    stessa regola di app/fulfillment_service.py.
     """
     pkg = _load_package(db, package_id)
 
@@ -323,7 +328,8 @@ def _calc_amounts_from_db(
 
     subtotal = _money2(unit_price * Decimal(int(units)))
 
-    discount_rate = Decimal("0.05") if (partner_code and str(partner_code).strip()) else Decimal("0.00")
+    apply_discount = bool(partner) and order_type != OrderType.PACKAGE_SCHOOL
+    discount_rate = Decimal("0.05") if apply_discount else Decimal("0.00")
     discount = _money2(subtotal * discount_rate)
     total = _money2(subtotal - discount)
 
@@ -412,11 +418,14 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
 
     order_type, package_id, quantity = _parse_product_to_order_fields(db, resolved_product)
 
+    partner = get_active_partner_by_code(db, data.customer.partner_code)
+
     subtotal, discount, total = _calc_amounts_from_db(
         db=db,
         package_id=package_id,
         units=quantity,
-        partner_code=data.customer.partner_code,
+        order_type=order_type,
+        partner=partner,
     )
 
     order = Order(
@@ -436,8 +445,8 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
         payment_method=PaymentMethod.STRIPE,
         payment_status=PaymentStatus.PENDING,
 
-        partner_id=None,
-        referral_code=(data.customer.partner_code.strip() if data.customer.partner_code else None),
+        partner_id=(partner.id if partner else None),
+        referral_code=(data.customer.partner_code.strip() if (partner and data.customer.partner_code) else None),
     )
 
     db.add(order)
