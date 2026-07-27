@@ -86,7 +86,6 @@ def create_manual_license(payload: AdminLicenseCreate, db: Session = Depends(get
 
     # 2) validità trial lato Site (finestra per attivare, es. 24h)
     expires_at = datetime.now(timezone.utc) + timedelta(hours=payload.duration_hours)
-    expires_at_iso = expires_at.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
     # 3) salva shadow record nel Site (storico/admin/email/notes)
     lic = License(
@@ -112,8 +111,8 @@ def create_manual_license(payload: AdminLicenseCreate, db: Session = Depends(get
                 to_email=payload.issued_to_email,
                 license_code=code,
                 max_guests=payload.max_guests,
-                duration_hours=payload.duration_hours,
-                expires_at_iso=expires_at_iso,
+                name=None,
+                language="en",
             )
         except Exception as e:
             logger.warning("Trial license email failed for %s: %s", payload.issued_to_email, str(e))
