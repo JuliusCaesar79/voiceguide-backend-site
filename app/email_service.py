@@ -19,6 +19,15 @@ def _get_env(name: str, default: str | None = None) -> str | None:
     return v
 
 
+DEFAULT_FROM_NAME = "VoiceGuide Team"
+
+PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.voiceguideairlinkbare&pcampaignid=web_share"
+APP_STORE_URL = "https://apps.apple.com/it/app/voiceguide-airlink/id6757807346"
+PURCHASE_PAGE_URL = "https://www.voiceguideapp.com/en/licenze"
+PARTNER_DISCOUNT_CODE = "VG-1F0DC4"
+WHATSAPP_URL = "https://wa.me/393755908650"
+
+
 def _send_email(
     to_email: str,
     subject: str,
@@ -46,13 +55,14 @@ def _send_email(
 
         api_key = _get_env("RESEND_API_KEY")
         from_email = _get_env("FROM_EMAIL") or _get_env("SMTP_FROM")  # fallback
+        from_name = _get_env("FROM_NAME") or _get_env("SMTP_FROM_NAME") or DEFAULT_FROM_NAME
         reply_to = _get_env("REPLY_TO_EMAIL") or _get_env("SMTP_REPLY_TO")
 
         if not api_key or not from_email:
             raise RuntimeError("RESEND_API_KEY / FROM_EMAIL mancanti nelle variabili d'ambiente.")
 
         payload: dict = {
-            "from": from_email,
+            "from": f"{from_name} <{from_email}>",
             "to": [to_email],
             "subject": subject,
             "text": text_body,
@@ -85,7 +95,7 @@ def _send_email(
     user = _get_env("SMTP_USER")
     password = _get_env("SMTP_PASS")
     from_email = _get_env("SMTP_FROM", user)
-    from_name = _get_env("SMTP_FROM_NAME", "")
+    from_name = _get_env("SMTP_FROM_NAME", DEFAULT_FROM_NAME)
     reply_to = _get_env("SMTP_REPLY_TO")
     use_tls = _get_env("SMTP_TLS", "1") == "1"
 
@@ -454,49 +464,177 @@ def send_trial_license_email(
     to_email: str,
     license_code: str,
     max_guests: int,
-    duration_hours: int,
-    expires_at_iso: str,
+    name: str | None = None,
+    language: str = "en",
 ) -> None:
-    subject = "VoiceGuide — Your Trial License Code"
+    lang = (language or "en").strip().lower()
+    display_name = (name or "").strip()
 
-    text_body = "\n".join(
-        [
-            "Hello,",
-            "",
-            "Here is your VoiceGuide trial license code:",
-            "",
-            license_code,
-            "",
-            f"Max guests: {max_guests}",
-            f"Valid for: {duration_hours} hours",
-            f"Expires at: {expires_at_iso} (UTC)",
-            "",
-            "If you have any questions, just reply to this email.",
-            "",
-            "Best regards,",
-            "VoiceGuide Team",
-        ]
-    )
+    if lang == "it":
+        subject = "VoiceGuide — Il tuo codice di licenza di prova 🎧"
+        greeting = f"Ciao {display_name}," if display_name else "Ciao,"
+        html_greeting = f"Ciao <b>{escape(display_name)}</b>," if display_name else "Ciao,"
 
-    html_body = f"""
-    <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
-      <p>Hello,</p>
-      <p>Here is your <b>VoiceGuide</b> trial license code:</p>
+        text_body = "\n".join(
+            [
+                greeting,
+                "",
+                "Grazie per aver scelto di provare VoiceGuide AirLink! Ecco il tuo codice di licenza di prova:",
+                "",
+                license_code,
+                "",
+                f"Ospiti massimi: {max_guests}",
+                "",
+                "Come iniziare:",
+                "1. Scarica l'app VoiceGuide AirLink sul tuo telefono (link qui sotto).",
+                "2. Apri l'app, scegli \"Guida\" e tocca \"Attiva Licenza\": inserisci il codice sopra.",
+                "3. Tocca \"Avvia Nuovo Tour\": l'app genererà un PIN.",
+                "4. Fai scaricare l'app anche ai tuoi ospiti (stesso link) e dai loro il PIN per farli entrare, scegliendo \"Ospite\".",
+                "",
+                "Consiglio: per una qualità audio migliore, ti suggeriamo un piccolo microfono per la guida e degli auricolari per gli ospiti.",
+                "",
+                f"Google Play: {PLAY_STORE_URL}",
+                f"App Store: {APP_STORE_URL}",
+                "",
+                "Da sapere: questa licenza non è nominativa — puoi condividerla con altre guide del tuo team, se ti serve.",
+                "",
+                f"Vuoi l'esperienza completa? Usa il codice {PARTNER_DISCOUNT_CODE} per avere il 5% di sconto quando acquisti una licenza:",
+                PURCHASE_PAGE_URL,
+                "",
+                "Domande? Rispondi a questa email oppure scrivici su WhatsApp:",
+                WHATSAPP_URL,
+                "",
+                "Un saluto,",
+                "VoiceGuide Team",
+            ]
+        )
 
-      <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
-        <div style="font-size:12px;color:#666;margin-bottom:6px;">Trial License Code</div>
-        <div style="font-size:22px;letter-spacing:1px;"><b>{escape(license_code)}</b></div>
-      </div>
+        html_body = f"""
+        <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
+          <p>{html_greeting}</p>
+          <p>Grazie per aver scelto di provare <b>VoiceGuide AirLink</b>! Ecco il tuo codice di licenza di prova:</p>
 
-      <p style="margin:0 0 6px 0;"><b>Max guests:</b> {max_guests}</p>
-      <p style="margin:0 0 12px 0;"><b>Valid for:</b> {duration_hours} hours</p>
-      <p style="margin:0 0 12px 0;"><b>Expires at:</b> {escape(expires_at_iso)} (UTC)</p>
+          <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
+            <div style="font-size:12px;color:#666;margin-bottom:6px;">Codice licenza di prova</div>
+            <div style="font-size:22px;letter-spacing:1px;"><b>{escape(license_code)}</b></div>
+          </div>
 
-      <p>If you have any questions, just reply to this email.</p>
+          <p style="margin:0 0 12px 0;"><b>Ospiti massimi:</b> {max_guests}</p>
 
-      <p style="margin-top:18px;color:#444;">Best regards,<br/><b>VoiceGuide Team</b></p>
-    </div>
-    """.strip()
+          <p style="margin:0 0 6px 0;"><b>Come iniziare:</b></p>
+          <ol style="margin:0 0 12px 0;padding-left:20px;">
+            <li>Scarica l'app VoiceGuide AirLink sul tuo telefono (link qui sotto).</li>
+            <li>Apri l'app, scegli "Guida" e tocca "Attiva Licenza": inserisci il codice sopra.</li>
+            <li>Tocca "Avvia Nuovo Tour": l'app genererà un PIN.</li>
+            <li>Fai scaricare l'app anche ai tuoi ospiti (stesso link) e dai loro il PIN per farli entrare, scegliendo "Ospite".</li>
+          </ol>
+
+          <p style="margin:0 0 16px 0;color:#444;">
+            💡 Consiglio: per una qualità audio migliore, ti suggeriamo un piccolo microfono per la guida e degli auricolari per gli ospiti.
+          </p>
+
+          <p style="margin:0 0 16px 0;">
+            📱 <a href="{PLAY_STORE_URL}">Google Play</a> &nbsp;|&nbsp;
+            🍏 <a href="{APP_STORE_URL}">App Store</a>
+          </p>
+
+          <p style="margin:0 0 16px 0;color:#444;">
+            Da sapere: questa licenza <b>non è nominativa</b> — puoi condividerla con altre guide del tuo team, se ti serve.
+          </p>
+
+          <div style="padding:14px;border:1px solid #FFC226;border-radius:10px;margin:16px 0;background:#FFFBEF;">
+            <p style="margin:0 0 8px 0;">Vuoi l'esperienza completa? Usa il codice <b>{escape(PARTNER_DISCOUNT_CODE)}</b> per avere il <b>5% di sconto</b> quando acquisti una licenza.</p>
+            <p style="margin:0;"><a href="{PURCHASE_PAGE_URL}"><b>Acquista una licenza →</b></a></p>
+          </div>
+
+          <p>Domande? Rispondi a questa email oppure scrivici su <a href="{WHATSAPP_URL}">WhatsApp</a>.</p>
+
+          <p style="margin-top:18px;color:#444;">Un saluto,<br/><b>VoiceGuide Team</b></p>
+        </div>
+        """.strip()
+
+    else:
+        subject = "VoiceGuide — Your Trial License Code 🎧"
+        greeting = f"Hello {display_name}," if display_name else "Hello,"
+        html_greeting = f"Hello <b>{escape(display_name)}</b>," if display_name else "Hello,"
+
+        text_body = "\n".join(
+            [
+                greeting,
+                "",
+                "Thanks for choosing to try VoiceGuide AirLink! Here is your trial license code:",
+                "",
+                license_code,
+                "",
+                f"Max guests: {max_guests}",
+                "",
+                "Getting started:",
+                "1. Download the VoiceGuide AirLink app on your phone (link below).",
+                "2. Open the app, choose \"Guide\" and tap \"Activate License\": enter the code above.",
+                "3. Tap \"Start New Tour\": the app will generate a PIN.",
+                "4. Have your guests download the app too (same link) and give them the PIN to join, choosing \"Guest\".",
+                "",
+                "Tip: for better audio quality, we recommend a small microphone for the guide and earbuds/headphones for the guests.",
+                "",
+                f"Google Play: {PLAY_STORE_URL}",
+                f"App Store: {APP_STORE_URL}",
+                "",
+                "Good to know: this license is not tied to a specific person — you can share it with other guides on your team if needed.",
+                "",
+                f"Want the full experience? Use code {PARTNER_DISCOUNT_CODE} for 5% off when you purchase a license:",
+                PURCHASE_PAGE_URL,
+                "",
+                "Questions? Reply to this email or reach us on WhatsApp:",
+                WHATSAPP_URL,
+                "",
+                "Best regards,",
+                "VoiceGuide Team",
+            ]
+        )
+
+        html_body = f"""
+        <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
+          <p>{html_greeting}</p>
+          <p>Thanks for choosing to try <b>VoiceGuide AirLink</b>! Here is your trial license code:</p>
+
+          <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
+            <div style="font-size:12px;color:#666;margin-bottom:6px;">Trial License Code</div>
+            <div style="font-size:22px;letter-spacing:1px;"><b>{escape(license_code)}</b></div>
+          </div>
+
+          <p style="margin:0 0 12px 0;"><b>Max guests:</b> {max_guests}</p>
+
+          <p style="margin:0 0 6px 0;"><b>Getting started:</b></p>
+          <ol style="margin:0 0 12px 0;padding-left:20px;">
+            <li>Download the VoiceGuide AirLink app on your phone (link below).</li>
+            <li>Open the app, choose "Guide" and tap "Activate License": enter the code above.</li>
+            <li>Tap "Start New Tour": the app will generate a PIN.</li>
+            <li>Have your guests download the app too (same link) and give them the PIN to join, choosing "Guest".</li>
+          </ol>
+
+          <p style="margin:0 0 16px 0;color:#444;">
+            💡 Tip: for better audio quality, we recommend a small microphone for the guide and earbuds/headphones for the guests.
+          </p>
+
+          <p style="margin:0 0 16px 0;">
+            📱 <a href="{PLAY_STORE_URL}">Google Play</a> &nbsp;|&nbsp;
+            🍏 <a href="{APP_STORE_URL}">App Store</a>
+          </p>
+
+          <p style="margin:0 0 16px 0;color:#444;">
+            Good to know: this license is <b>not tied to a specific person</b> — you can share it with other guides on your team if needed.
+          </p>
+
+          <div style="padding:14px;border:1px solid #FFC226;border-radius:10px;margin:16px 0;background:#FFFBEF;">
+            <p style="margin:0 0 8px 0;">Want the full experience? Use code <b>{escape(PARTNER_DISCOUNT_CODE)}</b> for <b>5% off</b> when you purchase a license.</p>
+            <p style="margin:0;"><a href="{PURCHASE_PAGE_URL}"><b>Buy a license →</b></a></p>
+          </div>
+
+          <p>Questions? Reply to this email or reach us on <a href="{WHATSAPP_URL}">WhatsApp</a>.</p>
+
+          <p style="margin-top:18px;color:#444;">Best regards,<br/><b>VoiceGuide Team</b></p>
+        </div>
+        """.strip()
 
     _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
 

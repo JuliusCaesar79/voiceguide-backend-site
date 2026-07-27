@@ -169,8 +169,8 @@ def issue_trial_request(
                 to_email=tr.email,
                 license_code=code,
                 max_guests=payload.max_guests,
-                duration_hours=payload.duration_hours,
-                expires_at_iso=expires_at_iso,
+                name=tr.name,
+                language=tr.language,
             )
         except Exception as e:
             logger.warning("Trial license email failed for %s: %s", tr.email, str(e))
