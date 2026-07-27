@@ -1,5 +1,6 @@
 # app/email_service.py
 import os
+import re
 import smtplib
 from email.message import EmailMessage
 from html import escape
@@ -26,6 +27,33 @@ APP_STORE_URL = "https://apps.apple.com/it/app/voiceguide-airlink/id6757807346"
 PURCHASE_PAGE_URL = "https://www.voiceguideapp.com/en/licenze"
 PARTNER_DISCOUNT_CODE = "VG-1F0DC4"
 WHATSAPP_URL = "https://wa.me/393755908650"
+
+
+def _friendly_product_label(product_code: str, language: str = "en") -> str:
+    """
+    Traduce un codice prodotto tecnico (es. SINGLE_25, PACKAGE_TO_10) in
+    un'etichetta leggibile per il cliente. Se il codice non è riconosciuto,
+    ritorna il codice originale così com'è (nessun dato perso).
+    """
+    code = (product_code or "").strip().upper()
+    lang = (language or "en").strip().lower()
+
+    m = re.fullmatch(r"SINGLE_(\d+)", code)
+    if m:
+        n = m.group(1)
+        return f"Licenza Singola ({n} ospiti)" if lang == "it" else f"Single License ({n} guests)"
+
+    m = re.fullmatch(r"PACKAGE_TO_(\d+)", code)
+    if m:
+        n = m.group(1)
+        return f"Pacchetto Tour Operator ({n} licenze)" if lang == "it" else f"Tour Operator Package ({n} licenses)"
+
+    m = re.fullmatch(r"PACKAGE_SCHOOL_(\d+)", code)
+    if m:
+        n = m.group(1)
+        return f"Pacchetto Scuole ({n} licenze)" if lang == "it" else f"School Package ({n} licenses)"
+
+    return product_code
 
 
 def _send_email(
@@ -147,8 +175,11 @@ def send_order_received_email(
     to_email: str,
     order_id: int,
     product: str,
-    invoice_requested: bool,
+    total_amount: float,
+    discount_amount: float = 0.0,
+    invoice_requested: bool = False,
     intestatario: str | None = None,
+    language: str = "en",
 ) -> None:
     """
     Email inviata quando creiamo un ordine "reale" in DB ma pagamento ancora PENDING.
@@ -157,54 +188,158 @@ def send_order_received_email(
     - invio email immediato
     anche prima di integrare Stripe/PayPal.
     """
-    subject = "VoiceGuide — Order received ✅"
+    lang = (language or "en").strip().lower()
+    friendly_product = _friendly_product_label(product, lang)
+    has_discount = discount_amount and discount_amount > 0
+    subtotal_amount = total_amount + discount_amount
 
-    inv_line = "Invoice requested: YES" if invoice_requested else "Invoice requested: NO"
-    if invoice_requested and intestatario:
-        inv_line += f" ({intestatario})"
+    if lang == "it":
+        subject = "VoiceGuide — Ordine ricevuto ✅"
+        inv_line = "Fattura richiesta: SÌ" if invoice_requested else "Fattura richiesta: NO"
+        if invoice_requested and intestatario:
+            inv_line += f" ({intestatario})"
 
-    text_body = "\n".join(
-        [
-            "Hello,",
-            "",
-            "We have received your order on VoiceGuide.",
-            "",
-            f"Order ID: {order_id}",
-            f"Product: {product}",
-            inv_line,
-            "",
-            "Payment status: PENDING",
-            "",
-            "We will send you a confirmation email as soon as the payment is completed.",
-            "",
-            "If you have any questions, simply reply to this email.",
-            "",
-            "Best regards,",
-            "VoiceGuide Team",
-        ]
-    )
+        amount_lines = (
+            [
+                f"Subtotale: €{subtotal_amount:.2f}",
+                f"Sconto applicato: -€{discount_amount:.2f}",
+                f"Totale da pagare: €{total_amount:.2f}",
+            ]
+            if has_discount
+            else [f"Totale da pagare: €{total_amount:.2f}"]
+        )
 
-    html_body = f"""
-    <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
-      <p>Hello,</p>
+        text_body = "\n".join(
+            [
+                "Ciao,",
+                "",
+                "Abbiamo ricevuto il tuo ordine su VoiceGuide.",
+                "",
+                f"Ordine nr.: {order_id}",
+                f"Prodotto: {friendly_product}",
+                *amount_lines,
+                inv_line,
+                "",
+                "Stato pagamento: IN ATTESA",
+                "",
+                "Ti invieremo un'email di conferma appena il pagamento sarà completato.",
+                "",
+                "Domande? Rispondi a questa email oppure scrivici su WhatsApp:",
+                WHATSAPP_URL,
+                "",
+                "Un saluto,",
+                "VoiceGuide Team",
+            ]
+        )
 
-      <p>We have received your order on <b>VoiceGuide</b>.</p>
+        amount_html = (
+            f"""
+              <b>Subtotale:</b> €{subtotal_amount:.2f}<br/>
+              <b>Sconto applicato:</b> -€{discount_amount:.2f}<br/>
+              <b>Totale da pagare:</b> €{total_amount:.2f}<br/>
+            """
+            if has_discount
+            else f"<b>Totale da pagare:</b> €{total_amount:.2f}<br/>"
+        )
 
-      <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
-        <div style="font-size:12px;color:#666;margin-bottom:6px;">Order details</div>
-        <div style="font-size:14px;">
-          <b>Order ID:</b> {order_id}<br/>
-          <b>Product:</b> {escape(product)}<br/>
-          <b>{escape(inv_line)}</b><br/>
-          <b>Payment status:</b> PENDING
+        html_body = f"""
+        <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
+          <p>Ciao,</p>
+
+          <p>Abbiamo ricevuto il tuo ordine su <b>VoiceGuide</b>.</p>
+
+          <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
+            <div style="font-size:12px;color:#666;margin-bottom:6px;">Dettagli ordine</div>
+            <div style="font-size:14px;">
+              <b>Ordine nr.:</b> {order_id}<br/>
+              <b>Prodotto:</b> {escape(friendly_product)}<br/>
+              {amount_html}
+              <b>{escape(inv_line)}</b><br/>
+              <b>Stato pagamento:</b> IN ATTESA
+            </div>
+          </div>
+
+          <p>Ti invieremo un'email di conferma appena il pagamento sarà completato.</p>
+
+          <p>Domande? Rispondi a questa email oppure scrivici su <a href="{WHATSAPP_URL}">WhatsApp</a>.</p>
+
+          <p style="margin-top:18px;color:#444;">Un saluto,<br/><b>VoiceGuide Team</b></p>
         </div>
-      </div>
+        """.strip()
 
-      <p>We will send you a confirmation email as soon as the payment is completed.</p>
+    else:
+        subject = "VoiceGuide — Order received ✅"
+        inv_line = "Invoice requested: YES" if invoice_requested else "Invoice requested: NO"
+        if invoice_requested and intestatario:
+            inv_line += f" ({intestatario})"
 
-      <p style="margin-top:18px;color:#444;">Best regards,<br/><b>VoiceGuide Team</b></p>
-    </div>
-    """.strip()
+        amount_lines = (
+            [
+                f"Subtotal: €{subtotal_amount:.2f}",
+                f"Discount applied: -€{discount_amount:.2f}",
+                f"Total to pay: €{total_amount:.2f}",
+            ]
+            if has_discount
+            else [f"Total to pay: €{total_amount:.2f}"]
+        )
+
+        text_body = "\n".join(
+            [
+                "Hello,",
+                "",
+                "We have received your order on VoiceGuide.",
+                "",
+                f"Order ID: {order_id}",
+                f"Product: {friendly_product}",
+                *amount_lines,
+                inv_line,
+                "",
+                "Payment status: PENDING",
+                "",
+                "We will send you a confirmation email as soon as the payment is completed.",
+                "",
+                "Questions? Reply to this email or reach us on WhatsApp:",
+                WHATSAPP_URL,
+                "",
+                "Best regards,",
+                "VoiceGuide Team",
+            ]
+        )
+
+        amount_html = (
+            f"""
+              <b>Subtotal:</b> €{subtotal_amount:.2f}<br/>
+              <b>Discount applied:</b> -€{discount_amount:.2f}<br/>
+              <b>Total to pay:</b> €{total_amount:.2f}<br/>
+            """
+            if has_discount
+            else f"<b>Total to pay:</b> €{total_amount:.2f}<br/>"
+        )
+
+        html_body = f"""
+        <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
+          <p>Hello,</p>
+
+          <p>We have received your order on <b>VoiceGuide</b>.</p>
+
+          <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
+            <div style="font-size:12px;color:#666;margin-bottom:6px;">Order details</div>
+            <div style="font-size:14px;">
+              <b>Order ID:</b> {order_id}<br/>
+              <b>Product:</b> {escape(friendly_product)}<br/>
+              {amount_html}
+              <b>{escape(inv_line)}</b><br/>
+              <b>Payment status:</b> PENDING
+            </div>
+          </div>
+
+          <p>We will send you a confirmation email as soon as the payment is completed.</p>
+
+          <p>Questions? Reply to this email or reach us on <a href="{WHATSAPP_URL}">WhatsApp</a>.</p>
+
+          <p style="margin-top:18px;color:#444;">Best regards,<br/><b>VoiceGuide Team</b></p>
+        </div>
+        """.strip()
 
     _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
 

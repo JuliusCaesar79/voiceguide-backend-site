@@ -468,8 +468,11 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
             to_email=order.buyer_email,
             order_id=order.id,
             product=resolved_product,
+            total_amount=float(total),
+            discount_amount=float(discount),
             invoice_requested=invoice_requested,
             intestatario=intestatario,
+            language=lang,
         )
     except Exception:
         pass
