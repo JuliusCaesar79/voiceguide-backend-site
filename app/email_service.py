@@ -797,6 +797,9 @@ def send_payment_received_email(
     elif license_code and license_code.strip():
         codes = [license_code.strip()]
 
+    friendly_product = _friendly_product_label(product, "en") if product else None
+    multiple_codes = len(codes) > 1
+
     lines = [
         "Hello,",
         "",
@@ -804,16 +807,32 @@ def send_payment_received_email(
         "",
         f"Order ID: {order_id}",
     ]
-    if product:
-        lines.append(f"Product: {product}")
+    if friendly_product:
+        lines.append(f"Product: {friendly_product}")
 
     if codes:
         lines += ["", "Your license code(s):"]
         lines += [f"- {c}" for c in codes]
+        if multiple_codes:
+            lines += ["", "Each code activates one separate license — share the different codes among your team's guides."]
 
     lines += [
         "",
-        "If you have any questions, just reply to this email.",
+        "Getting started:",
+        "1. Download the VoiceGuide AirLink app on your phone (links below).",
+        "2. Open the app, choose \"Guide\" and tap \"Activate License\": enter one of the codes above.",
+        "3. Tap \"Start New Tour\": the app will generate a PIN.",
+        "4. Have your guests download the app too (same link) and give them the PIN to join, choosing \"Guest\".",
+        "",
+        "Tip: for better audio quality, we recommend a small microphone for the guide and earbuds/headphones for the guests.",
+        "",
+        f"Google Play: {PLAY_STORE_URL}",
+        f"App Store: {APP_STORE_URL}",
+        "",
+        "Good to know: these licenses are not tied to a specific person — you can share them with other guides on your team if needed.",
+        "",
+        "Questions? Reply to this email or reach us on WhatsApp:",
+        WHATSAPP_URL,
         "",
         "Best regards,",
         "VoiceGuide Team",
@@ -828,6 +847,12 @@ def send_payment_received_email(
 
         lis = "\n".join([f"<li style='margin:4px 0;'><code>{escape(c)}</code></li>" for c in codes])
 
+        multi_note_html = (
+            """<p style="margin:10px 0 0 0;color:#444;">Each code activates one separate license — share the different codes among your team's guides.</p>"""
+            if multiple_codes
+            else ""
+        )
+
         license_html = f"""
         <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
           <div style="font-size:12px;color:#666;margin-bottom:10px;">Your License Code(s)</div>
@@ -841,6 +866,7 @@ def send_payment_received_email(
           <ul style="margin:0;padding-left:18px;">
             {lis}
           </ul>
+          {multi_note_html}
         </div>
         """.strip()
 
@@ -853,14 +879,35 @@ def send_payment_received_email(
         <div style="font-size:12px;color:#666;margin-bottom:6px;">Order details</div>
         <div style="font-size:14px;">
           <b>Order ID:</b> {order_id}<br/>
-          {"<b>Product:</b> " + escape(product) + "<br/>" if product else ""}
+          {"<b>Product:</b> " + escape(friendly_product) + "<br/>" if friendly_product else ""}
           <b>Status:</b> PAID
         </div>
       </div>
 
       {license_html}
 
-      <p>If you have any questions, just reply to this email.</p>
+      <p style="margin:0 0 6px 0;"><b>Getting started:</b></p>
+      <ol style="margin:0 0 12px 0;padding-left:20px;">
+        <li>Download the VoiceGuide AirLink app on your phone (link below).</li>
+        <li>Open the app, choose "Guide" and tap "Activate License": enter one of the codes above.</li>
+        <li>Tap "Start New Tour": the app will generate a PIN.</li>
+        <li>Have your guests download the app too (same link) and give them the PIN to join, choosing "Guest".</li>
+      </ol>
+
+      <p style="margin:0 0 16px 0;color:#444;">
+        💡 Tip: for better audio quality, we recommend a small microphone for the guide and earbuds/headphones for the guests.
+      </p>
+
+      <p style="margin:0 0 16px 0;">
+        📱 <a href="{PLAY_STORE_URL}">Google Play</a> &nbsp;|&nbsp;
+        🍏 <a href="{APP_STORE_URL}">App Store</a>
+      </p>
+
+      <p style="margin:0 0 16px 0;color:#444;">
+        Good to know: these licenses are <b>not tied to a specific person</b> — you can share them with other guides on your team if needed.
+      </p>
+
+      <p>Questions? Reply to this email or reach us on <a href="{WHATSAPP_URL}">WhatsApp</a>.</p>
       <p style="margin-top:18px;color:#444;">Best regards,<br/><b>VoiceGuide Team</b></p>
     </div>
     """.strip()
