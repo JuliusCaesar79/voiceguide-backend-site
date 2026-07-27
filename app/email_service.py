@@ -27,6 +27,7 @@ APP_STORE_URL = "https://apps.apple.com/it/app/voiceguide-airlink/id6757807346"
 PURCHASE_PAGE_URL = "https://www.voiceguideapp.com/en/licenze"
 PARTNER_DISCOUNT_CODE = "VG-1F0DC4"
 WHATSAPP_URL = "https://wa.me/393755908650"
+PARTNER_PORTAL_URL = "https://voiceguide-partner-production.up.railway.app"
 
 
 def _friendly_product_label(product_code: str, language: str = "en") -> str:
@@ -377,7 +378,12 @@ def send_partner_request_approved_email(
         "",
         "You can share this code with your clients during the purchase process.",
         "",
-        "If you have any questions, simply reply to this email — our support team will be happy to assist you.",
+        "Log in to your Partner Dashboard to track your orders and commissions:",
+        PARTNER_PORTAL_URL,
+        "(use your email and the Partner Code above to log in)",
+        "",
+        "If you have any questions, simply reply to this email or reach us on WhatsApp:",
+        WHATSAPP_URL,
         "",
         "Best regards,",
         "VoiceGuide Team",
@@ -408,7 +414,14 @@ def send_partner_request_approved_email(
       {html_extra}
 
       <p>You can share this code with your clients during the purchase process.</p>
-      <p>If you have any questions, simply reply to this email — our support team will be happy to assist you.</p>
+
+      <div style="padding:14px;border:1px solid #FFC226;border-radius:10px;margin:16px 0;background:#FFFBEF;">
+        <p style="margin:0 0 8px 0;">Log in to your Partner Dashboard to track your orders and commissions.</p>
+        <p style="margin:0 0 8px 0;"><a href="{PARTNER_PORTAL_URL}"><b>Open Partner Dashboard →</b></a></p>
+        <p style="margin:0;color:#666;font-size:13px;">(use your email and the Partner Code above to log in)</p>
+      </div>
+
+      <p>If you have any questions, simply reply to this email or reach us on <a href="{WHATSAPP_URL}">WhatsApp</a>.</p>
 
       <p style="margin-top:18px;color:#444;">Best regards,<br/><b>VoiceGuide Team</b></p>
     </div>
@@ -435,7 +448,8 @@ def send_partner_request_rejected_email(
             "",
             "After reviewing your request, we are unable to approve it at this time.",
             "",
-            "If you would like further information or wish to submit a new request in the future, feel free to reply to this email.",
+            "If you would like further information or wish to submit a new request in the future, feel free to reply to this email or reach us on WhatsApp:",
+            WHATSAPP_URL,
             "",
             "Kind regards,",
             "VoiceGuide Team",
@@ -451,7 +465,7 @@ def send_partner_request_rejected_email(
 
       <p>After reviewing your request, we are unable to approve it at this time.</p>
 
-      <p>If you would like further information or wish to submit a new request in the future, feel free to reply to this email.</p>
+      <p>If you would like further information or wish to submit a new request in the future, feel free to reply to this email or reach us on <a href="{WHATSAPP_URL}">WhatsApp</a>.</p>
 
       <p style="margin-top:18px;color:#444;">Kind regards,<br/><b>VoiceGuide Team</b></p>
     </div>
@@ -496,7 +510,8 @@ def send_partner_tier_changed_email(
         lines.append(f"Commission: {commission_pct}%")
     lines += [
         "",
-        "If you have any questions, simply reply to this email.",
+        "If you have any questions, simply reply to this email or reach us on WhatsApp:",
+        WHATSAPP_URL,
         "",
         "Best regards,",
         "VoiceGuide Team",
@@ -519,7 +534,7 @@ def send_partner_tier_changed_email(
         </div>
       </div>
 
-      <p>If you have any questions, simply reply to this email.</p>
+      <p>If you have any questions, simply reply to this email or reach us on <a href="{WHATSAPP_URL}">WhatsApp</a>.</p>
 
       <p style="margin-top:18px;color:#444;">Best regards,<br/><b>VoiceGuide Team</b></p>
     </div>
@@ -546,15 +561,18 @@ def send_partner_collaboration_closed_email(
     lines = [
         f"Hello {name},",
         "",
-        "This is a notification regarding your VoiceGuide Partner collaboration.",
+        "We want to thank you for your collaboration as a VoiceGuide Partner.",
         "",
-        "Your collaboration has been set to inactive by our admin team.",
+        "Your partner collaboration has been set to inactive by our admin team.",
     ]
     if reason and reason.strip():
         lines += ["", f"Reason: {reason.strip()}"]
     lines += [
         "",
-        "If you believe this is a mistake or you need further details, simply reply to this email.",
+        "If you believe this is a mistake or you need further details, simply reply to this email or reach us on WhatsApp:",
+        WHATSAPP_URL,
+        "",
+        "Thank you again for the time we spent working together.",
         "",
         "Kind regards,",
         "VoiceGuide Team",
@@ -575,15 +593,17 @@ def send_partner_collaboration_closed_email(
     <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
       <p>Hello <b>{safe_name}</b>,</p>
 
-      <p>This is a notification regarding your <b>VoiceGuide Partner</b> collaboration.</p>
+      <p>We want to thank you for your collaboration as a <b>VoiceGuide Partner</b>.</p>
 
-      <p>Your collaboration has been set to <b>inactive</b> by our admin team.</p>
+      <p>Your partner collaboration has been set to <b>inactive</b> by our admin team.</p>
 
       {reason_html}
 
       <p style="margin-top:14px;">
-        If you believe this is a mistake or you need further details, simply reply to this email.
+        If you believe this is a mistake or you need further details, simply reply to this email or reach us on <a href="{WHATSAPP_URL}">WhatsApp</a>.
       </p>
+
+      <p style="margin-top:14px;">Thank you again for the time we spent working together.</p>
 
       <p style="margin-top:18px;color:#444;">Kind regards,<br/><b>VoiceGuide Team</b></p>
     </div>
