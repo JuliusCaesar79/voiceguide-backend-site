@@ -22,3 +22,6 @@ requests>=2.31.0
 
 # Payments
 stripe==14.1.0
+
+# Chat assistant
+anthropic>=0.69.0
