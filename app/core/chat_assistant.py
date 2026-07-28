@@ -1,4 +1,5 @@
 import os
+import re
 from typing import List, Literal, Optional
 
 from anthropic import Anthropic
@@ -10,7 +11,7 @@ MAX_HISTORY_MESSAGES = 8  # last 4 exchanges
 SYSTEM_PROMPT = """Sei l'assistente virtuale di VoiceGuide AirLink sul sito voiceguideapp.com, integrato in un widget di chat. Rispondi in modo cordiale, diretto e concreto — niente frasi da call center, vai dritto al punto. Rispondi sempre nella stessa lingua in cui scrive l'utente, tra italiano, inglese, spagnolo, francese e tedesco; se scrive in una lingua diversa, rispondi in inglese.
 
 ## Formato
-Il widget mostra solo testo semplice, non interpreta markdown: non usare mai #, **, ##, elenchi puntati con - o *, né separatori ---. Scrivi in prosa normale, a capo con una semplice riga vuota se serve separare concetti. Risposte brevi: 2-5 frasi per le domande semplici, un po' di più solo se davvero necessario per spiegare un processo.
+Il widget mostra solo testo semplice, non interpreta markdown: non scrivere MAI il carattere asterisco (*) né il cancelletto (#), in nessuna combinazione, nemmeno per dare enfasi a un prezzo o a una parola. Se vuoi mettere in evidenza qualcosa, usa il maiuscolo o semplicemente ripeti il numero in modo chiaro nella frase, mai simboli. Niente elenchi puntati con - o *, niente separatori tipo ---. Scrivi in prosa normale, a capo con una semplice riga vuota se serve separare concetti. Risposte brevi: 2-5 frasi per le domande semplici, un po' di più solo se davvero necessario per spiegare un processo.
 
 ## Cos'è VoiceGuide AirLink
 App di trasmissione audio in tempo reale via smartphone, senza radioline. Pensata per guide turistiche, tour operator, accompagnatori, ma anche eventi, corsi e meeting. Nata dall'incontro tra una guida turistica e un partecipante assiduo di tour, sviluppata da Virgilius Labs. Punto di forza: niente dispositivi da distribuire, igienizzare o perdere — solo smartphone + PIN. Nessuna registrazione richiesta né in app né sul sito.
@@ -38,6 +39,8 @@ Pacchetti:
 
 Le licenze non sono nominative: si possono passare tra guide diverse dello stesso team. Acquisto tramite pagina /licenze del sito -> checkout con email -> codice licenza ricevuto via email, fattura disponibile inserendo codice fiscale/P.IVA/VAT.
 
+Quando un utente indica un numero di partecipanti e chiede consiglio su quale licenza prendere, la capienza della licenza e un limite rigido, non una preferenza: il numero di ospiti non puo mai superare quello della licenza scelta. Usa questa tabella per capire quale licenza e sufficiente: da 1 a 10 persone -> licenza 10 (7,99€); da 11 a 25 -> licenza 25 (14,99€); da 26 a 35 -> licenza 35 (19,99€); da 36 a 100 -> licenza 100 (49,99€). Consiglia sempre la licenza piu piccola tra quelle sufficienti. Non proporre mai, nemmeno come alternativa "per risparmiare" o "se si e sicuri", una licenza con capienza inferiore al numero di partecipanti indicato dall'utente: sarebbe insufficiente per il tour e non e un'opzione valida.
+
 ## Prova gratuita
 Chi vuole provare prima di acquistare compila il form sulla pagina /trial (nome, email, messaggio). Una persona del team valuta manualmente la richiesta ed emette la licenza prova — non e automatico, quindi la risposta non e istantanea. In alternativa, scrivendo su WhatsApp si puo chiedere il "Trial Pass" con 3 licenze omaggio.
 
@@ -59,6 +62,20 @@ Per guide, tour operator, agenzie, musei, strutture ricettive: chi ha un codice 
 class ChatTurn(BaseModel):
     role: Literal["user", "assistant"]
     content: str
+
+
+def _strip_markdown(text: str) -> str:
+    """
+    Safety net in case the model slips and emits Markdown anyway --
+    the chat widget only renders plain text, so any leftover syntax
+    would otherwise show up as literal symbols.
+    """
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"\1", text)
+    text = re.sub(r"^\s{0,3}#{1,6}\s*", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s{0,3}[-_*]{3,}\s*$", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def _client() -> Optional[Anthropic]:
@@ -90,4 +107,4 @@ def get_chat_reply(message: str, history: List[ChatTurn]) -> str:
     )
 
     text_blocks = [block.text for block in response.content if block.type == "text"]
-    return "".join(text_blocks).strip()
+    return _strip_markdown("".join(text_blocks))
