@@ -12,6 +12,7 @@ router = APIRouter(prefix="", tags=["Chat"])
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
     history: List[ChatTurn] = Field(default_factory=list)
+    locale: str = Field(default="it", max_length=5)
 
 
 class ChatResponse(BaseModel):
@@ -21,7 +22,7 @@ class ChatResponse(BaseModel):
 @router.post("/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest):
     try:
-        reply = get_chat_reply(payload.message, payload.history)
+        reply = get_chat_reply(payload.message, payload.history, payload.locale)
     except RuntimeError:
         raise HTTPException(
             status_code=503,

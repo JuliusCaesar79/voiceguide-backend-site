@@ -8,6 +8,10 @@ from pydantic import BaseModel
 CHAT_MODEL = "claude-haiku-4-5"
 MAX_HISTORY_MESSAGES = 8  # last 4 exchanges
 
+SITE_BASE_URL = "https://voiceguideapp.com"
+WHATSAPP_URL = "https://wa.me/393755908650"
+SUPPORTED_LOCALES = {"it", "en", "es", "fr", "de"}
+
 SYSTEM_PROMPT = """Sei l'assistente virtuale di VoiceGuide AirLink sul sito voiceguideapp.com, integrato in un widget di chat. Rispondi in modo cordiale, diretto e concreto — niente frasi da call center, vai dritto al punto. Rispondi sempre nella stessa lingua in cui scrive l'utente, tra italiano, inglese, spagnolo, francese e tedesco; se scrive in una lingua diversa, rispondi in inglese.
 
 ## Formato
@@ -56,7 +60,9 @@ Per guide, tour operator, agenzie, musei, strutture ricettive: chi ha un codice 
 - Non inventare mai prezzi, sconti o funzionalita non elencate qui.
 - Non gestire pagamenti ne chiedere dati di carta/pagamento -- indirizza sempre al checkout del sito.
 - Se la domanda e tecnica/specifica, riguarda un problema con un ordine gia fatto, o l'utente chiede esplicitamente di parlare con una persona, invita a scrivere su WhatsApp (link diretto) o via email.
-- Se non sai rispondere con certezza, dillo onestamente e rimanda a WhatsApp invece di tirare a indovinare."""
+- Se non sai rispondere con certezza, dillo onestamente e rimanda a WhatsApp invece di tirare a indovinare.
+- Quando spieghi come richiedere la prova gratuita, scrivi sempre anche il link diretto alla pagina del form (te lo indico io piu sotto in base alla lingua della conversazione), cosi l'utente puo cliccarlo subito invece di doverlo cercare. Scrivilo come URL nudo, senza parentesi quadre ne altra formattazione markdown.
+- Ogni volta che suggerisci di scrivere su WhatsApp, scrivi sempre anche il link diretto (te lo indico io piu sotto), non solo il numero di telefono. Anche questo come URL nudo."""
 
 
 class ChatTurn(BaseModel):
@@ -85,7 +91,7 @@ def _client() -> Optional[Anthropic]:
     return Anthropic(api_key=api_key)
 
 
-def get_chat_reply(message: str, history: List[ChatTurn]) -> str:
+def get_chat_reply(message: str, history: List[ChatTurn], locale: str = "it") -> str:
     """
     Calls Claude with the VoiceGuide AirLink support system prompt.
     Returns the assistant's reply text.
@@ -95,6 +101,15 @@ def get_chat_reply(message: str, history: List[ChatTurn]) -> str:
     if client is None:
         raise RuntimeError("ANTHROPIC_API_KEY not configured")
 
+    locale = locale if locale in SUPPORTED_LOCALES else "it"
+    trial_url = f"{SITE_BASE_URL}/{locale}/trial"
+    links_note = (
+        "\n\n## Link da usare in questa conversazione\n"
+        f"Link diretto al form della prova gratuita: {trial_url}\n"
+        f"Link diretto a WhatsApp: {WHATSAPP_URL}"
+    )
+    system_prompt = SYSTEM_PROMPT + links_note
+
     trimmed_history = history[-MAX_HISTORY_MESSAGES:]
     messages = [{"role": turn.role, "content": turn.content} for turn in trimmed_history]
     messages.append({"role": "user", "content": message})
@@ -102,7 +117,7 @@ def get_chat_reply(message: str, history: List[ChatTurn]) -> str:
     response = client.messages.create(
         model=CHAT_MODEL,
         max_tokens=700,
-        system=SYSTEM_PROMPT,
+        system=system_prompt,
         messages=messages,
     )
 
