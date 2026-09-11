@@ -33,6 +33,7 @@ class TrialRequestRow(BaseModel):
     email: str
     language: str
     message: Optional[str]
+    requested_max_guests: Optional[int] = None
     status: str
     created_at: datetime
 

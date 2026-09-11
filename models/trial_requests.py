@@ -26,6 +26,10 @@ class TrialRequest(Base):
     # Messaggio / note
     message = Column(String, nullable=True)
 
+    # Taglio richiesto dal selettore sul form pubblico (5/10/15/25/35/50/100).
+    # Nullable: richieste vecchie, o inviate senza selezione, restano NULL.
+    requested_max_guests = Column(Integer, nullable=True)
+
     # Stato gestione admin
     status = Column(
         Enum(TrialRequestStatus, name="trial_request_status"),
