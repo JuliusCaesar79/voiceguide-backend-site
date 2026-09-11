@@ -33,6 +33,13 @@ from models.licenses import License, LicenseType
 from models.partners import Partner
 from models.partner_payouts import PartnerPayout
 
+# Unica fonte per costante e stima costo Agora (vedi app/fulfillment_service.py)
+from app.fulfillment_service import (
+    STANDARD_TOUR_MINUTES,
+    estimate_agora_cost_for_single_license,
+    estimate_agora_cost_for_n_licenses,
+)
+
 router = APIRouter(prefix="/purchase", tags=["Purchase"])
 logger = logging.getLogger(__name__)
 
@@ -61,13 +68,6 @@ SCHOOL_PACKAGES: dict[int, Decimal] = {
     10: Decimal("249"),
     30: Decimal("675"),
 }
-
-# -------------------------------------------------
-# AGORA COST (internal)
-# -------------------------------------------------
-
-AGORA_AUDIO_PRICE_PER_1000_MIN = Decimal("0.99")
-STANDARD_TOUR_MINUTES = 240  # 4 hours
 
 # -------------------------------------------------
 # PARTNER DISCOUNT
@@ -147,18 +147,6 @@ def generate_license_code() -> str:
 
 def money2(v: Decimal) -> Decimal:
     return v.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-
-def estimate_agora_cost_for_single_license(max_guests: int) -> Decimal:
-    participants = max_guests + 1
-    total_minutes = Decimal(participants * STANDARD_TOUR_MINUTES)
-    cost = (total_minutes / Decimal("1000")) * AGORA_AUDIO_PRICE_PER_1000_MIN
-    return money2(cost)
-
-
-def estimate_agora_cost_for_package(num_licenses: int, max_guests_per_license: int) -> Decimal:
-    per_license = estimate_agora_cost_for_single_license(max_guests_per_license)
-    return money2(per_license * Decimal(num_licenses))
 
 
 def get_active_partner_by_code(db: Session, referral_code: str | None) -> Partner | None:
@@ -397,7 +385,7 @@ def purchase_package(payload: PackagePurchaseRequest, db: Session = Depends(get_
         subtotal_amount=subtotal,
         discount_amount=discount,
         total_amount=total,
-        estimated_agora_cost=estimate_agora_cost_for_package(payload.bundle_size, max_guests),
+        estimated_agora_cost=estimate_agora_cost_for_n_licenses(payload.bundle_size, max_guests),
         payment_method=PaymentMethod.STRIPE,
         payment_status=PaymentStatus.PAID,
         partner_id=partner.id if partner else None,

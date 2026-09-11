@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 # -----------------------------
 # AGORA COST (internal)
 # -----------------------------
-AGORA_AUDIO_PRICE_PER_1000_MIN = Decimal("0.99")
+# Listino pubblico Agora RTC, verificato in Console l'11/09/2026 (nessun costo
+# reale sostenuto finora: consumo sempre sotto la soglia free 10.000 min/mese).
+AGORA_AUDIO_PRICE_PER_1000_MIN = Decimal("0.59")
 STANDARD_TOUR_MINUTES = 240  # 4 hours
 
 # PARTNER DISCOUNT (5%)
