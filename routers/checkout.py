@@ -299,6 +299,42 @@ def _resolve_package_id_by_type_and_num_licenses(db: Session, package_type: str,
     return int(getattr(row, "id"))
 
 
+def _resolve_bundle5_package_id(db: Session, max_guests: int) -> int:
+    """
+    Per PACKAGE_BUNDLE5_X ("5 Tour"): 5 licenze a capienza variabile.
+    Riusa package_type='TO' (stessa famiglia concettuale dei pacchetti Tour
+    Operator, stesso sconto partner) ma con num_licenses=5 fisso e max_guests
+    variabile — a differenza di _resolve_package_id_by_type_and_num_licenses,
+    qui serve filtrare anche per max_guests perché più righe condividono lo
+    stesso num_licenses=5 e si distinguono solo per capienza.
+    """
+    _require_package_model()
+
+    q = db.query(Package)
+
+    if hasattr(Package, "package_type"):
+        q = q.filter(getattr(Package, "package_type") == "TO")
+
+    if hasattr(Package, "num_licenses"):
+        q = q.filter(getattr(Package, "num_licenses") == 5)
+
+    if hasattr(Package, "is_active"):
+        q = q.filter(getattr(Package, "is_active") == True)  # noqa
+
+    if hasattr(Package, "max_guests"):
+        q = q.filter(getattr(Package, "max_guests") == max_guests)
+    else:
+        raise HTTPException(status_code=500, detail="packages missing max_guests column.")
+
+    row = q.first()
+    if not row:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Missing packages row for BUNDLE5_{max_guests} (package_type=TO, num_licenses=5).",
+        )
+    return int(getattr(row, "id"))
+
+
 def _load_package(db: Session, package_id: int) -> Any:
     _require_package_model()
     row = db.query(Package).filter(getattr(Package, "id") == int(package_id)).first()
@@ -375,6 +411,17 @@ def _parse_product_to_order_fields(db: Session, product: str) -> Tuple[OrderType
 
         package_id = _resolve_package_id_by_type_and_num_licenses(db, package_type="SCHOOL", num_licenses=nl)
         return (OrderType.PACKAGE_SCHOOL, package_id, 1)
+
+    if prod.startswith("PACKAGE_BUNDLE5_"):
+        try:
+            mg = int(prod.split("_")[-1])
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid product PACKAGE_BUNDLE5_x")
+
+        # Stessa famiglia "TO" lato order_type/license_type: sconto partner
+        # incluso, coerente coi pacchetti Tour Operator esistenti.
+        package_id = _resolve_bundle5_package_id(db, max_guests=mg)
+        return (OrderType.PACKAGE_TO, package_id, 1)
 
     raise HTTPException(status_code=400, detail=f"Invalid product: {product}")
 
