@@ -19,7 +19,7 @@ from routers import trial_requests, admin_trial_requests
 from routers import admin_partner_requests, partner_requests
 from routers import checkout
 from routers import stripe_webhook  # ✅ Webhooks Stripe
-from routers import chat
+# Chat del sito tolta il 2026-10-20: su voiceguideapp.com risponde IoAlly.
 
 # ----------------------------------------------------
 # 🚀 FASTAPI APP
@@ -94,8 +94,6 @@ app.include_router(partner_requests.router)
 app.include_router(checkout.router)
 
 app.include_router(stripe_webhook.router)  # ✅ webhooks
-
-app.include_router(chat.router)
 
 # ----------------------------------------------------
 # 🏠 BASE

@@ -24,4 +24,3 @@ requests>=2.31.0
 stripe==14.1.0
 
 # Chat assistant
-anthropic>=0.69.0
