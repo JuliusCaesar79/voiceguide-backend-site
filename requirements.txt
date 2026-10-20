@@ -1,26 +1,31 @@
-fastapi
-uvicorn
+# Versioni fissate il 2026-10-20: senza, Railway installava le più nuove a
+# ogni build e SQLAlchemy 2.1 (driver PostgreSQL di default diverso, psycopg 3
+# non installato) faceva fallire l'avvio. Sono quelle dell'ambiente locale con
+# cui il backend gira; gli aggiornamenti vanno fatti apposta e provati.
+fastapi==0.124.0
+starlette==0.50.0
+uvicorn==0.38.0
 
-SQLAlchemy
-psycopg2-binary
-alembic
+SQLAlchemy==2.0.44
+psycopg2-binary==2.9.11
+alembic==1.17.2
 
-python-dotenv
+python-dotenv==1.2.1
 
-pydantic
-pydantic[email]
-pydantic-settings
+pydantic==2.12.5
+pydantic_core==2.41.5
+pydantic[email]==2.12.5
+email-validator==2.3.0
+pydantic-settings==2.12.0
 
-python-jose
+python-jose==3.5.0
 
 # Password hashing (ADMIN AUTH)
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 
 # HTTP client per bridge Site → AirLink
-requests>=2.31.0
+requests==2.32.5
 
 # Payments
 stripe==14.1.0
-
-# Chat assistant
