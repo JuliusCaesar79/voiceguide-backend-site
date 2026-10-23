@@ -4,7 +4,7 @@ Registrazione gratuita dal sito: email + codice di 6 cifre -> 3 licenze
 (5, 25, 35 ospiti), una sola volta per email.
 
 POST /free-tours/start   {email, lang}        -> manda il codice
-POST /free-tours/verify  {email, code, lang}  -> crea e manda le 3 licenze
+POST /free-tours/verify  {email, code, lang}  -> crea e manda le 3 licenze (e le restituisce)
 
 Protezioni (approvate da Stefano il 2026-10-23): domini usa e getta bloccati,
 email normalizzate (alias Gmail e +tag contano come la stessa casella),
@@ -233,4 +233,9 @@ def verify(payload: VerifyIn, request: Request):
         # Le licenze esistono gia': l'admin le vede in dashboard e puo' rimandarle.
         logger.error("Free tours licenses email FAILED for %s: %s", email, e)
 
-    return {"ok": True, "licenses": len(issued)}
+    # I codici tornano anche al sito, che li mostra subito: l'email puo'
+    # finire in spam (successo con Yahoo il 2026-10-23).
+    return {
+        "ok": True,
+        "licenses": [{"code": code, "max_guests": n} for code, n in issued],
+    }
