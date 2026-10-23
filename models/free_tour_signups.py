@@ -42,4 +42,6 @@ class FreeTourSignup(Base):
     # Promemoria a 7 giorni per chi non ha ancora usato nessun codice
     # (app/free_tours_reminders.py) e disiscrizione dai promemoria.
     reminder_sent_at = Column(DateTime(timezone=True), nullable=True)
+    # Email 2 giorni dopo il primo codice usato (com'e' andata + prezzi).
+    followup_sent_at = Column(DateTime(timezone=True), nullable=True)
     emails_opt_out_at = Column(DateTime(timezone=True), nullable=True)

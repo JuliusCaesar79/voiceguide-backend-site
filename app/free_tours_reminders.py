@@ -1,7 +1,9 @@
 # app/free_tours_reminders.py
 """
-Promemoria a chi si e' registrato sul sito (3 tour gratuiti) ma dopo 7 giorni
-non ha ancora attivato nessun codice. Uno solo per persona.
+Email automatiche dopo la registrazione sul sito (3 tour gratuiti), una sola
+volta ciascuna per persona:
+- promemoria 7 giorni dopo, se non ha ancora attivato nessun codice;
+- "com'e' andata?" + prezzi 2 giorni dopo il primo codice attivato.
 
 Gira dentro l'app: un ciclo controlla ogni ora (start_reminder_loop, avviato
 da app/main.py solo se FREE_TOURS_REMINDERS=1). L'uso dei codici si legge da
@@ -17,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import update
 
 from app.db import SessionLocal
-from app.free_tours_emails import send_free_tours_reminder_email
+from app.free_tours_emails import send_free_tours_followup_email, send_free_tours_reminder_email
 from models.free_tour_signups import FreeTourSignup
 from models.licenses import License
 from routers.admin_free_tours import _airlink_activations
@@ -26,6 +28,7 @@ from routers.free_tours import ISSUED_BY
 logger = logging.getLogger(__name__)
 
 REMIND_AFTER_DAYS = 7
+FOLLOWUP_AFTER_DAYS = 2
 CHECK_EVERY_SECONDS = 3600
 
 
@@ -45,21 +48,32 @@ def unsubscribe_url(signup_id: int, lang: str) -> str:
     return f"{_api_base()}/free-tours/unsubscribe?id={signup_id}&t={unsubscribe_token(signup_id)}&lang={lang}"
 
 
-def due_reminders(db, now: datetime | None = None) -> list[dict] | None:
-    """Chi deve ricevere il promemoria adesso; None se AirLink non risponde."""
+def _parse_dt(value) -> datetime | None:
+    """activated_at arriva da AirLink come stringa ISO (a volte senza fuso: e' UTC)."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def due_emails(db, now: datetime | None = None) -> dict[str, list[dict]] | None:
+    """{"reminder": [...], "followup": [...]} da mandare adesso; None se AirLink non risponde."""
     now = now or datetime.now(timezone.utc)
     signups = (
         db.query(FreeTourSignup)
         .filter(
             FreeTourSignup.verified_at.isnot(None),
-            FreeTourSignup.verified_at <= now - timedelta(days=REMIND_AFTER_DAYS),
-            FreeTourSignup.reminder_sent_at.is_(None),
             FreeTourSignup.emails_opt_out_at.is_(None),
+            (FreeTourSignup.reminder_sent_at.is_(None) | FreeTourSignup.followup_sent_at.is_(None)),
         )
         .all()
     )
+    due: dict[str, list[dict]] = {"reminder": [], "followup": []}
     if not signups:
-        return []
+        return due
 
     emails = [s.email_normalized for s in signups]
     licenses = (
@@ -75,72 +89,76 @@ def due_reminders(db, now: datetime | None = None) -> list[dict] | None:
     for lic in licenses:
         by_email.setdefault(lic.issued_to_email, []).append(lic)
 
-    due = []
     for s in signups:
         lics = sorted(by_email.get(s.email_normalized, []), key=lambda x: x.max_guests)
-        if not lics or any(activations.get(lic.code) for lic in lics):
-            continue  # ha gia' usato almeno un codice: niente promemoria
-        due.append(
-            {
-                "id": s.id,
-                "email": s.email,
-                "language": s.language,
-                "licenses": [(lic.code, lic.max_guests) for lic in lics],
-            }
-        )
+        if not lics:
+            continue
+        used = [d for d in (_parse_dt(activations.get(lic.code)) for lic in lics) if d]
+        unused = [(lic.code, lic.max_guests) for lic in lics if not activations.get(lic.code)]
+        base = {"id": s.id, "email": s.email, "language": s.language}
+        verified = s.verified_at if s.verified_at.tzinfo else s.verified_at.replace(tzinfo=timezone.utc)
+
+        if used:
+            # Ha usato almeno un codice: il promemoria non serve piu'.
+            if s.followup_sent_at is None and min(used) <= now - timedelta(days=FOLLOWUP_AFTER_DAYS):
+                due["followup"].append({**base, "licenses": unused})
+        elif s.reminder_sent_at is None and verified <= now - timedelta(days=REMIND_AFTER_DAYS):
+            due["reminder"].append({**base, "licenses": unused})
     return due
 
 
-def send_due_reminders() -> int:
-    """Un giro: manda i promemoria dovuti e restituisce quanti ne ha mandati."""
-    db = SessionLocal()
-    sent = 0
+def _send_once(db, item: dict, column, send) -> bool:
+    """Segna l'invio prima di spedire (due giri sovrapposti non mandano doppioni);
+    se l'invio fallisce libera la riga, cosi' il giro dopo riprova."""
+    claimed = db.execute(
+        update(FreeTourSignup)
+        .where(FreeTourSignup.id == item["id"], column.is_(None))
+        .values({column.key: datetime.now(timezone.utc)})
+    ).rowcount
+    db.commit()
+    if not claimed:
+        return False
     try:
-        due = due_reminders(db)
+        send(
+            item["email"],
+            item["licenses"],
+            item["language"],
+            unsubscribe_url(item["id"], item["language"]),
+        )
+        return True
+    except Exception as e:
+        logger.error("Email tour gratuiti (%s) FALLITA per id=%s: %s", column.key, item["id"], e)
+        db.execute(update(FreeTourSignup).where(FreeTourSignup.id == item["id"]).values({column.key: None}))
+        db.commit()
+        return False
+
+
+def send_due_emails() -> dict[str, int]:
+    """Un giro: manda le email dovute e restituisce quante per tipo."""
+    db = SessionLocal()
+    sent = {"reminder": 0, "followup": 0}
+    try:
+        due = due_emails(db)
         if due is None:
-            logger.warning("Promemoria tour gratuiti: AirLink non risponde, riprovo al prossimo giro")
-            return 0
-        for item in due:
-            # Segno l'invio prima di spedire: se due giri si sovrappongono,
-            # solo uno trova reminder_sent_at vuoto.
-            claimed = db.execute(
-                update(FreeTourSignup)
-                .where(FreeTourSignup.id == item["id"], FreeTourSignup.reminder_sent_at.is_(None))
-                .values(reminder_sent_at=datetime.now(timezone.utc))
-            ).rowcount
-            db.commit()
-            if not claimed:
-                continue
-            try:
-                send_free_tours_reminder_email(
-                    to_email=item["email"],
-                    licenses=item["licenses"],
-                    language=item["language"],
-                    unsubscribe_url=unsubscribe_url(item["id"], item["language"]),
-                )
-                sent += 1
-            except Exception as e:
-                # Libero la riga: al prossimo giro ci riprova.
-                logger.error("Promemoria tour gratuiti FALLITO per id=%s: %s", item["id"], e)
-                db.execute(
-                    update(FreeTourSignup)
-                    .where(FreeTourSignup.id == item["id"])
-                    .values(reminder_sent_at=None)
-                )
-                db.commit()
+            logger.warning("Email tour gratuiti: AirLink non risponde, riprovo al prossimo giro")
+            return sent
+        for item in due["reminder"]:
+            sent["reminder"] += _send_once(db, item, FreeTourSignup.reminder_sent_at, send_free_tours_reminder_email)
+        for item in due["followup"]:
+            sent["followup"] += _send_once(db, item, FreeTourSignup.followup_sent_at, send_free_tours_followup_email)
     finally:
         db.close()
-    if sent:
-        logger.info("Promemoria tour gratuiti inviati: %s", sent)
+    if any(sent.values()):
+        logger.info("Email tour gratuiti inviate: %s", sent)
     return sent
 
 
 async def _loop() -> None:
     while True:
         try:
-            await asyncio.to_thread(send_due_reminders)
+            await asyncio.to_thread(send_due_emails)
         except Exception as e:
-            logger.error("Promemoria tour gratuiti: giro fallito: %s", e)
+            logger.error("Email tour gratuiti: giro fallito: %s", e)
         await asyncio.sleep(CHECK_EVERY_SECONDS)
 
 

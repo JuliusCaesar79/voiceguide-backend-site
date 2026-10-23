@@ -308,3 +308,120 @@ def send_free_tours_reminder_email(
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Email 2 giorni dopo il primo codice usato (app/free_tours_reminders.py):
+# com'e' andata + prezzi, senza sconti (decisione di Stefano, 2026-10-23).
+# ---------------------------------------------------------------------------
+FOLLOWUP = {
+    "it": {
+        "subject": "Com'è andato il tuo tour con VoiceGuide?",
+        "title": "Com'è andato il tour?",
+        "intro": "Qualche giorno fa hai usato il tuo primo codice VoiceGuide AirLink. Speriamo che il gruppo ti abbia sentito forte e chiaro!",
+        "ask": "Ci racconti com'è andata? Basta rispondere a questa email, anche con due righe: le leggiamo tutte e ci aiutano a migliorare l'app.",
+        "remaining": "Ti restano ancora questi codici:",
+        "pricing": "Quando ti serviranno altri tour, li compri uno alla volta, senza abbonamento: €3,99 fino a 5 ospiti, €14,99 fino a 25. Se fai tour spesso, con il pacchetto da 5 tour (25 ospiti) ogni tour costa €12.",
+        "unsub": "Non vuoi ricevere altre email come questa?",
+    },
+    "en": {
+        "subject": "How did your VoiceGuide tour go?",
+        "title": "How did the tour go?",
+        "intro": "A few days ago you used your first VoiceGuide AirLink code. We hope your group heard you loud and clear!",
+        "ask": "Will you tell us how it went? Just reply to this email, even with a couple of lines: we read every reply and it helps us improve the app.",
+        "remaining": "You still have these codes:",
+        "pricing": "When you need more tours, buy them one at a time, no subscription: €3.99 for up to 5 guests, €14.99 for up to 25. If you guide often, with the 5-tour pack (25 guests) each tour costs €12.",
+        "unsub": "Don't want any more emails like this?",
+    },
+    "fr": {
+        "subject": "Comment s'est passée votre visite avec VoiceGuide ?",
+        "title": "Comment s'est passée la visite ?",
+        "intro": "Il y a quelques jours, vous avez utilisé votre premier code VoiceGuide AirLink. Nous espérons que votre groupe vous a entendu haut et clair !",
+        "ask": "Vous nous racontez comment ça s'est passé ? Il suffit de répondre à cet e-mail, même en deux lignes : nous lisons toutes les réponses et elles nous aident à améliorer l'application.",
+        "remaining": "Il vous reste encore ces codes :",
+        "pricing": "Quand il vous faudra d'autres visites, achetez-les une à la fois, sans abonnement : 3,99 € jusqu'à 5 participants, 14,99 € jusqu'à 25. Si vous guidez souvent, avec le pack 5 visites (25 participants), chaque visite revient à 12 €.",
+        "unsub": "Vous ne voulez plus recevoir d'e-mails comme celui-ci ?",
+    },
+    "es": {
+        "subject": "¿Qué tal fue tu tour con VoiceGuide?",
+        "title": "¿Qué tal fue el tour?",
+        "intro": "Hace unos días usaste tu primer código de VoiceGuide AirLink. ¡Esperamos que tu grupo te haya oído alto y claro!",
+        "ask": "¿Nos cuentas qué tal fue? Basta con responder a este email, aunque sea con dos líneas: leemos todas las respuestas y nos ayudan a mejorar la app.",
+        "remaining": "Todavía te quedan estos códigos:",
+        "pricing": "Cuando necesites más tours, cómpralos de uno en uno, sin suscripción: 3,99 € hasta 5 participantes, 14,99 € hasta 25. Si haces tours a menudo, con el pack de 5 tours (25 participantes) cada tour sale a 12 €.",
+        "unsub": "¿No quieres recibir más emails como este?",
+    },
+    "de": {
+        "subject": "Wie war Ihre Tour mit VoiceGuide?",
+        "title": "Wie war die Tour?",
+        "intro": "Vor ein paar Tagen haben Sie Ihren ersten Code für VoiceGuide AirLink genutzt. Wir hoffen, Ihre Gruppe hat Sie laut und deutlich gehört!",
+        "ask": "Erzählen Sie uns, wie es war? Antworten Sie einfach auf diese E-Mail, gern auch in zwei Zeilen: Wir lesen jede Antwort, und sie hilft uns, die App zu verbessern.",
+        "remaining": "Diese Codes haben Sie noch:",
+        "pricing": "Wenn Sie weitere Touren brauchen, kaufen Sie sie einzeln, ohne Abo: 3,99 € bis 5 Gäste, 14,99 € bis 25. Wenn Sie oft führen, kostet mit dem 5-Touren-Paket (25 Gäste) jede Tour 12 €.",
+        "unsub": "Sie möchten keine solchen E-Mails mehr?",
+    },
+}
+
+
+def build_free_tours_followup_email(
+    remaining: list[tuple[str, int]],
+    language: str,
+    unsubscribe_url: str,
+) -> tuple[str, str, str]:
+    """(oggetto, testo, html); remaining = codici non ancora usati (anche vuoto)."""
+    lang, t = _t(language)
+    f = FOLLOWUP[lang]
+    pricing_url = f"{SITE_URL}/{lang}#prezzi"
+
+    codes_html = ""
+    if remaining:
+        rows = "".join(
+            f"""<tr>
+          <td style="padding:10px 12px;border-bottom:1px solid #F1EBDD;font-size:18px;font-weight:bold;letter-spacing:1px;">{escape(code)}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid #F1EBDD;font-size:14px;color:#4A4F5A;text-align:right;white-space:nowrap;">{escape(t["guests"].format(n=n))}</td>
+        </tr>"""
+            for code, n in remaining
+        )
+        codes_html = f"""
+      <p style="margin:0 0 8px;font-size:15px;font-weight:bold;">{escape(f["remaining"])}</p>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#FFF8E6;border:2px solid #F2C94C;border-radius:14px;margin:0 0 20px;">
+        {rows}
+      </table>"""
+
+    unsub = REMINDER[lang]["unsub_link"]
+    inner = f"""
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#4A4F5A;">{escape(f["intro"])}</p>
+      <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#14161B;font-weight:bold;">{escape(f["ask"])}</p>
+      {codes_html}
+      <p style="margin:0 0 16px;font-size:14px;line-height:1.55;color:#4A4F5A;">{escape(f["pricing"])}</p>
+      <p style="margin:0 0 22px;">
+        <a href="{pricing_url}" style="display:inline-block;background:#FFC226;color:#14161B;text-decoration:none;font-weight:bold;font-size:14px;padding:12px 20px;border-radius:999px;">{escape(t["buy"])} →</a>
+      </p>
+      <p style="margin:0 0 20px;font-size:14px;color:#14161B;">{escape(t["signoff"])}</p>
+      <p style="margin:0;font-size:12px;line-height:1.5;color:#8A8F99;">{escape(f["unsub"])} <a href="{escape(unsubscribe_url)}" style="color:#8A8F99;">{escape(unsub)}</a></p>
+    """
+    text_lines = [f["title"], "", f["intro"], "", f["ask"], ""]
+    if remaining:
+        text_lines += [f["remaining"]] + [f"{code} — {t['guests'].format(n=n)}" for code, n in remaining] + [""]
+    text_lines += [f["pricing"], f"{t['buy']}: {pricing_url}", "", t["signoff"], "", f"{f['unsub']} {unsubscribe_url}"]
+
+    return f["subject"], "\n".join(text_lines), _layout(f["title"], inner, lang)
+
+
+def send_free_tours_followup_email(
+    to_email: str,
+    remaining: list[tuple[str, int]],
+    language: str,
+    unsubscribe_url: str,
+) -> None:
+    subject, text, html = build_free_tours_followup_email(remaining, language, unsubscribe_url)
+    _send_email(
+        to_email=to_email,
+        subject=subject,
+        text_body=text,
+        html_body=html,
+        headers={
+            "List-Unsubscribe": f"<{unsubscribe_url}>",
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        },
+    )
