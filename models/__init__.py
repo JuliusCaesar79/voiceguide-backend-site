@@ -22,6 +22,7 @@ from .partner_payments import PartnerPayment  # noqa: F401
 # --------------------------------------------------
 from .partner_requests import PartnerRequest  # noqa: F401
 from .trial_requests import TrialRequest  # noqa: F401
+from .free_tour_signups import FreeTourSignup  # noqa: F401
 
 # --------------------------------------------------
 # Admin

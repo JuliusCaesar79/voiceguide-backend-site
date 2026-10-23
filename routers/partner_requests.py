@@ -7,11 +7,15 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+import logging
+
 from app.db import get_db
+from app.partner_emails import send_partner_request_admin_notice, send_partner_request_received_email
 from models.partner_requests import PartnerRequest, PartnerRequestStatus
 from schemas.partner_requests import PartnerRequestCreate, PartnerRequestOut
 
 router = APIRouter(prefix="/partner-requests", tags=["Partner Requests"])
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------
@@ -22,6 +26,8 @@ class PartnerRequestPublicIn(BaseModel):
     email: EmailStr
     organization: Optional[str] = None
     message: Optional[str] = None
+    # Lingua del sito, per l'email di conferma (form nuovo, 2026-10)
+    language: Optional[str] = None
 
 
 def _tier_from_organization(org: Optional[str]) -> str:
@@ -166,4 +172,17 @@ def create_partner_request(payload: dict, db: Session = Depends(get_db)):
         )
 
     db.refresh(req)
+
+    # Email non bloccanti: conferma a chi si candida (solo form del sito) e
+    # avviso all'admin. Un errore di invio non annulla la candidatura.
+    if parsed_public is not None:
+        try:
+            send_partner_request_received_email(email, name, parsed_public.language or "it")
+        except Exception as e:
+            logger.warning("Partner request confirmation email FAILED for %s: %s", email, e)
+        try:
+            send_partner_request_admin_notice(name, email, parsed_public.organization, notes)
+        except Exception as e:
+            logger.warning("Partner request admin notice FAILED for %s: %s", email, e)
+
     return req
