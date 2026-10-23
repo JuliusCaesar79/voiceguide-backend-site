@@ -15,7 +15,7 @@ from models import Base
 from routers import purchase, auth_partner
 from routers import auth_admin, admin, payouts_admin, admin_partners
 from routers import partner_portal, partner_payments_admin, admin_licenses
-from routers import trial_requests, admin_trial_requests, free_tours
+from routers import trial_requests, admin_trial_requests, free_tours, admin_free_tours
 from routers import admin_partner_requests, partner_requests
 from routers import checkout
 from routers import stripe_webhook  # ✅ Webhooks Stripe
@@ -88,6 +88,7 @@ app.include_router(admin_licenses.router)
 app.include_router(trial_requests.router)
 app.include_router(admin_trial_requests.router)
 app.include_router(free_tours.router)
+app.include_router(admin_free_tours.router)
 
 app.include_router(admin_partner_requests.router)
 app.include_router(partner_requests.router)
