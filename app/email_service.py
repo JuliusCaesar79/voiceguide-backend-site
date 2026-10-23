@@ -159,6 +159,14 @@ def _send_email(
         server.send_message(msg)
 
 
+def _branded(subject: str, html_body: str) -> str:
+    """Mette il contenuto nel layout comune (logo, scheda, piè di pagina). Email partner: in inglese."""
+    from app.email_layout import layout
+
+    title = subject.split("—", 1)[-1].strip().rstrip("✅").strip()
+    return layout(title, html_body, "en")
+
+
 # ✅ Manteniamo la funzione esistente (compatibilità)
 def send_receipt_email(
     to_email: str,
@@ -182,167 +190,19 @@ def send_order_received_email(
     intestatario: str | None = None,
     language: str = "en",
 ) -> None:
-    """
-    Email inviata quando creiamo un ordine "reale" in DB ma pagamento ancora PENDING.
-    Utile per attivare subito:
-    - tracciamento ordini in Admin
-    - invio email immediato
-    anche prima di integrare Stripe/PayPal.
-    """
-    lang = (language or "en").strip().lower()
-    friendly_product = _friendly_product_label(product, lang)
-    has_discount = discount_amount and discount_amount > 0
-    subtotal_amount = total_amount + discount_amount
+    """Ordine ricevuto (pagamento in attesa): email nello stile nuovo, in 5 lingue."""
+    from app.customer_emails import send_order_received
 
-    if lang == "it":
-        subject = "VoiceGuide — Ordine ricevuto ✅"
-        inv_line = "Fattura richiesta: SÌ" if invoice_requested else "Fattura richiesta: NO"
-        if invoice_requested and intestatario:
-            inv_line += f" ({intestatario})"
-
-        amount_lines = (
-            [
-                f"Subtotale: €{subtotal_amount:.2f}",
-                f"Sconto applicato: -€{discount_amount:.2f}",
-                f"Totale da pagare: €{total_amount:.2f}",
-            ]
-            if has_discount
-            else [f"Totale da pagare: €{total_amount:.2f}"]
-        )
-
-        text_body = "\n".join(
-            [
-                "Ciao,",
-                "",
-                "Abbiamo ricevuto il tuo ordine su VoiceGuide.",
-                "",
-                f"Ordine nr.: {order_id}",
-                f"Prodotto: {friendly_product}",
-                *amount_lines,
-                inv_line,
-                "",
-                "Stato pagamento: IN ATTESA",
-                "",
-                "Ti invieremo un'email di conferma appena il pagamento sarà completato.",
-                "",
-                "Domande? Rispondi a questa email oppure scrivici su WhatsApp:",
-                WHATSAPP_URL,
-                "",
-                "Un saluto,",
-                "VoiceGuide Team",
-            ]
-        )
-
-        amount_html = (
-            f"""
-              <b>Subtotale:</b> €{subtotal_amount:.2f}<br/>
-              <b>Sconto applicato:</b> -€{discount_amount:.2f}<br/>
-              <b>Totale da pagare:</b> €{total_amount:.2f}<br/>
-            """
-            if has_discount
-            else f"<b>Totale da pagare:</b> €{total_amount:.2f}<br/>"
-        )
-
-        html_body = f"""
-        <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
-          <p>Ciao,</p>
-
-          <p>Abbiamo ricevuto il tuo ordine su <b>VoiceGuide</b>.</p>
-
-          <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
-            <div style="font-size:12px;color:#666;margin-bottom:6px;">Dettagli ordine</div>
-            <div style="font-size:14px;">
-              <b>Ordine nr.:</b> {order_id}<br/>
-              <b>Prodotto:</b> {escape(friendly_product)}<br/>
-              {amount_html}
-              <b>{escape(inv_line)}</b><br/>
-              <b>Stato pagamento:</b> IN ATTESA
-            </div>
-          </div>
-
-          <p>Ti invieremo un'email di conferma appena il pagamento sarà completato.</p>
-
-          <p>Domande? Rispondi a questa email oppure scrivici su <a href="{WHATSAPP_URL}">WhatsApp</a>.</p>
-
-          <p style="margin-top:18px;color:#444;">Un saluto,<br/><b>VoiceGuide Team</b></p>
-        </div>
-        """.strip()
-
-    else:
-        subject = "VoiceGuide — Order received ✅"
-        inv_line = "Invoice requested: YES" if invoice_requested else "Invoice requested: NO"
-        if invoice_requested and intestatario:
-            inv_line += f" ({intestatario})"
-
-        amount_lines = (
-            [
-                f"Subtotal: €{subtotal_amount:.2f}",
-                f"Discount applied: -€{discount_amount:.2f}",
-                f"Total to pay: €{total_amount:.2f}",
-            ]
-            if has_discount
-            else [f"Total to pay: €{total_amount:.2f}"]
-        )
-
-        text_body = "\n".join(
-            [
-                "Hello,",
-                "",
-                "We have received your order on VoiceGuide.",
-                "",
-                f"Order ID: {order_id}",
-                f"Product: {friendly_product}",
-                *amount_lines,
-                inv_line,
-                "",
-                "Payment status: PENDING",
-                "",
-                "We will send you a confirmation email as soon as the payment is completed.",
-                "",
-                "Questions? Reply to this email or reach us on WhatsApp:",
-                WHATSAPP_URL,
-                "",
-                "Best regards,",
-                "VoiceGuide Team",
-            ]
-        )
-
-        amount_html = (
-            f"""
-              <b>Subtotal:</b> €{subtotal_amount:.2f}<br/>
-              <b>Discount applied:</b> -€{discount_amount:.2f}<br/>
-              <b>Total to pay:</b> €{total_amount:.2f}<br/>
-            """
-            if has_discount
-            else f"<b>Total to pay:</b> €{total_amount:.2f}<br/>"
-        )
-
-        html_body = f"""
-        <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
-          <p>Hello,</p>
-
-          <p>We have received your order on <b>VoiceGuide</b>.</p>
-
-          <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
-            <div style="font-size:12px;color:#666;margin-bottom:6px;">Order details</div>
-            <div style="font-size:14px;">
-              <b>Order ID:</b> {order_id}<br/>
-              <b>Product:</b> {escape(friendly_product)}<br/>
-              {amount_html}
-              <b>{escape(inv_line)}</b><br/>
-              <b>Payment status:</b> PENDING
-            </div>
-          </div>
-
-          <p>We will send you a confirmation email as soon as the payment is completed.</p>
-
-          <p>Questions? Reply to this email or reach us on <a href="{WHATSAPP_URL}">WhatsApp</a>.</p>
-
-          <p style="margin-top:18px;color:#444;">Best regards,<br/><b>VoiceGuide Team</b></p>
-        </div>
-        """.strip()
-
-    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
+    send_order_received(
+        to_email=to_email,
+        order_id=order_id,
+        product=product,
+        total_amount=total_amount,
+        discount_amount=discount_amount,
+        invoice_requested=invoice_requested,
+        intestatario=intestatario,
+        language=language,
+    )
 
 
 # -------------------------------------------------
@@ -427,7 +287,7 @@ def send_partner_request_approved_email(
     </div>
     """.strip()
 
-    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
+    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=_branded(subject, html_body))
 
 
 def send_partner_request_rejected_email(
@@ -471,7 +331,7 @@ def send_partner_request_rejected_email(
     </div>
     """.strip()
 
-    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
+    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=_branded(subject, html_body))
 
 
 # -------------------------------------------------
@@ -540,7 +400,7 @@ def send_partner_tier_changed_email(
     </div>
     """.strip()
 
-    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
+    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=_branded(subject, html_body))
 
 
 def send_partner_collaboration_closed_email(
@@ -609,7 +469,7 @@ def send_partner_collaboration_closed_email(
     </div>
     """.strip()
 
-    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
+    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=_branded(subject, html_body))
 
 
 # -------------------------------------------------
@@ -622,176 +482,10 @@ def send_trial_license_email(
     name: str | None = None,
     language: str = "en",
 ) -> None:
-    lang = (language or "en").strip().lower()
-    display_name = (name or "").strip()
+    """Licenza di prova: email nello stile nuovo, in 5 lingue."""
+    from app.customer_emails import send_trial_license
 
-    if lang == "it":
-        subject = "VoiceGuide — Il tuo codice di licenza di prova 🎧"
-        greeting = f"Ciao {display_name}," if display_name else "Ciao,"
-        html_greeting = f"Ciao <b>{escape(display_name)}</b>," if display_name else "Ciao,"
-
-        text_body = "\n".join(
-            [
-                greeting,
-                "",
-                "Grazie per aver scelto di provare VoiceGuide AirLink! Ecco il tuo codice di licenza di prova:",
-                "",
-                license_code,
-                "",
-                f"Ospiti massimi: {max_guests}",
-                "",
-                "Come iniziare:",
-                "1. Scarica l'app VoiceGuide AirLink sul tuo telefono (link qui sotto).",
-                "2. Apri l'app, scegli \"Guida\" e tocca \"Attiva Licenza\": inserisci il codice sopra.",
-                "3. Tocca \"Avvia Nuovo Tour\": l'app genererà un PIN.",
-                "4. Fai scaricare l'app anche ai tuoi ospiti (stesso link) e dai loro il PIN per farli entrare, scegliendo \"Ospite\".",
-                "",
-                "Consiglio: per una qualità audio migliore, ti suggeriamo un piccolo microfono per la guida e degli auricolari per gli ospiti.",
-                "",
-                f"Google Play: {PLAY_STORE_URL}",
-                f"App Store: {APP_STORE_URL}",
-                "",
-                "Da sapere: questa licenza non è nominativa — puoi condividerla con altre guide del tuo team, se ti serve.",
-                "",
-                f"Vuoi l'esperienza completa? Usa il codice {PARTNER_DISCOUNT_CODE} per avere il 5% di sconto quando acquisti una licenza:",
-                PURCHASE_PAGE_URL,
-                "",
-                "Domande? Rispondi a questa email oppure scrivici su WhatsApp:",
-                WHATSAPP_URL,
-                "",
-                "Un saluto,",
-                "VoiceGuide Team",
-            ]
-        )
-
-        html_body = f"""
-        <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
-          <p>{html_greeting}</p>
-          <p>Grazie per aver scelto di provare <b>VoiceGuide AirLink</b>! Ecco il tuo codice di licenza di prova:</p>
-
-          <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
-            <div style="font-size:12px;color:#666;margin-bottom:6px;">Codice licenza di prova</div>
-            <div style="font-size:22px;letter-spacing:1px;"><b>{escape(license_code)}</b></div>
-          </div>
-
-          <p style="margin:0 0 12px 0;"><b>Ospiti massimi:</b> {max_guests}</p>
-
-          <p style="margin:0 0 6px 0;"><b>Come iniziare:</b></p>
-          <ol style="margin:0 0 12px 0;padding-left:20px;">
-            <li>Scarica l'app VoiceGuide AirLink sul tuo telefono (link qui sotto).</li>
-            <li>Apri l'app, scegli "Guida" e tocca "Attiva Licenza": inserisci il codice sopra.</li>
-            <li>Tocca "Avvia Nuovo Tour": l'app genererà un PIN.</li>
-            <li>Fai scaricare l'app anche ai tuoi ospiti (stesso link) e dai loro il PIN per farli entrare, scegliendo "Ospite".</li>
-          </ol>
-
-          <p style="margin:0 0 16px 0;color:#444;">
-            💡 Consiglio: per una qualità audio migliore, ti suggeriamo un piccolo microfono per la guida e degli auricolari per gli ospiti.
-          </p>
-
-          <p style="margin:0 0 16px 0;">
-            📱 <a href="{PLAY_STORE_URL}">Google Play</a> &nbsp;|&nbsp;
-            🍏 <a href="{APP_STORE_URL}">App Store</a>
-          </p>
-
-          <p style="margin:0 0 16px 0;color:#444;">
-            Da sapere: questa licenza <b>non è nominativa</b> — puoi condividerla con altre guide del tuo team, se ti serve.
-          </p>
-
-          <div style="padding:14px;border:1px solid #FFC226;border-radius:10px;margin:16px 0;background:#FFFBEF;">
-            <p style="margin:0 0 8px 0;">Vuoi l'esperienza completa? Usa il codice <b>{escape(PARTNER_DISCOUNT_CODE)}</b> per avere il <b>5% di sconto</b> quando acquisti una licenza.</p>
-            <p style="margin:0;"><a href="{PURCHASE_PAGE_URL}"><b>Acquista una licenza →</b></a></p>
-          </div>
-
-          <p>Domande? Rispondi a questa email oppure scrivici su <a href="{WHATSAPP_URL}">WhatsApp</a>.</p>
-
-          <p style="margin-top:18px;color:#444;">Un saluto,<br/><b>VoiceGuide Team</b></p>
-        </div>
-        """.strip()
-
-    else:
-        subject = "VoiceGuide — Your Trial License Code 🎧"
-        greeting = f"Hello {display_name}," if display_name else "Hello,"
-        html_greeting = f"Hello <b>{escape(display_name)}</b>," if display_name else "Hello,"
-
-        text_body = "\n".join(
-            [
-                greeting,
-                "",
-                "Thanks for choosing to try VoiceGuide AirLink! Here is your trial license code:",
-                "",
-                license_code,
-                "",
-                f"Max guests: {max_guests}",
-                "",
-                "Getting started:",
-                "1. Download the VoiceGuide AirLink app on your phone (link below).",
-                "2. Open the app, choose \"Guide\" and tap \"Activate License\": enter the code above.",
-                "3. Tap \"Start New Tour\": the app will generate a PIN.",
-                "4. Have your guests download the app too (same link) and give them the PIN to join, choosing \"Guest\".",
-                "",
-                "Tip: for better audio quality, we recommend a small microphone for the guide and earbuds/headphones for the guests.",
-                "",
-                f"Google Play: {PLAY_STORE_URL}",
-                f"App Store: {APP_STORE_URL}",
-                "",
-                "Good to know: this license is not tied to a specific person — you can share it with other guides on your team if needed.",
-                "",
-                f"Want the full experience? Use code {PARTNER_DISCOUNT_CODE} for 5% off when you purchase a license:",
-                PURCHASE_PAGE_URL,
-                "",
-                "Questions? Reply to this email or reach us on WhatsApp:",
-                WHATSAPP_URL,
-                "",
-                "Best regards,",
-                "VoiceGuide Team",
-            ]
-        )
-
-        html_body = f"""
-        <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
-          <p>{html_greeting}</p>
-          <p>Thanks for choosing to try <b>VoiceGuide AirLink</b>! Here is your trial license code:</p>
-
-          <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
-            <div style="font-size:12px;color:#666;margin-bottom:6px;">Trial License Code</div>
-            <div style="font-size:22px;letter-spacing:1px;"><b>{escape(license_code)}</b></div>
-          </div>
-
-          <p style="margin:0 0 12px 0;"><b>Max guests:</b> {max_guests}</p>
-
-          <p style="margin:0 0 6px 0;"><b>Getting started:</b></p>
-          <ol style="margin:0 0 12px 0;padding-left:20px;">
-            <li>Download the VoiceGuide AirLink app on your phone (link below).</li>
-            <li>Open the app, choose "Guide" and tap "Activate License": enter the code above.</li>
-            <li>Tap "Start New Tour": the app will generate a PIN.</li>
-            <li>Have your guests download the app too (same link) and give them the PIN to join, choosing "Guest".</li>
-          </ol>
-
-          <p style="margin:0 0 16px 0;color:#444;">
-            💡 Tip: for better audio quality, we recommend a small microphone for the guide and earbuds/headphones for the guests.
-          </p>
-
-          <p style="margin:0 0 16px 0;">
-            📱 <a href="{PLAY_STORE_URL}">Google Play</a> &nbsp;|&nbsp;
-            🍏 <a href="{APP_STORE_URL}">App Store</a>
-          </p>
-
-          <p style="margin:0 0 16px 0;color:#444;">
-            Good to know: this license is <b>not tied to a specific person</b> — you can share it with other guides on your team if needed.
-          </p>
-
-          <div style="padding:14px;border:1px solid #FFC226;border-radius:10px;margin:16px 0;background:#FFFBEF;">
-            <p style="margin:0 0 8px 0;">Want the full experience? Use code <b>{escape(PARTNER_DISCOUNT_CODE)}</b> for <b>5% off</b> when you purchase a license.</p>
-            <p style="margin:0;"><a href="{PURCHASE_PAGE_URL}"><b>Buy a license →</b></a></p>
-          </div>
-
-          <p>Questions? Reply to this email or reach us on <a href="{WHATSAPP_URL}">WhatsApp</a>.</p>
-
-          <p style="margin-top:18px;color:#444;">Best regards,<br/><b>VoiceGuide Team</b></p>
-        </div>
-        """.strip()
-
-    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)
+    send_trial_license(to_email=to_email, license_code=license_code, max_guests=max_guests, name=name, language=language)
 
 
 def send_payment_received_email(
@@ -800,136 +494,21 @@ def send_payment_received_email(
     product: str | None = None,
     license_code: str | None = None,
     license_codes: list[str] | None = None,
+    language: str | None = None,
 ) -> None:
     """
-    Email inviata quando Stripe/PayPal conferma il pagamento.
-
-    ✅ Supporta sia:
-      - singolo codice: license_code="VG-...."   (retro-compatibilità)
-      - lista codici:  license_codes=[...]       (pacchetti)
+    Pagamento confermato con i codici licenza, nella lingua dell'ordine
+    (orders.language; gli ordini vecchi senza lingua restano in inglese).
+    Supporta sia un codice singolo (license_code) sia una lista (pacchetti).
     """
-    subject = "VoiceGuide — Payment confirmed ✅"
+    from app.customer_emails import send_payment_confirmed
 
-    # Normalizza: se arriva una lista usala; altrimenti fallback al singolo
     codes: list[str] = []
     if license_codes:
         codes = [c.strip() for c in license_codes if (c or "").strip()]
     elif license_code and license_code.strip():
         codes = [license_code.strip()]
 
-    friendly_product = _friendly_product_label(product, "en") if product else None
-    multiple_codes = len(codes) > 1
+    send_payment_confirmed(to_email=to_email, order_id=order_id, product=product, codes=codes, language=language or "en")
 
-    lines = [
-        "Hello,",
-        "",
-        "Your payment has been confirmed.",
-        "",
-        f"Order ID: {order_id}",
-    ]
-    if friendly_product:
-        lines.append(f"Product: {friendly_product}")
 
-    if codes:
-        lines += ["", "Your license code(s):"]
-        lines += [f"- {c}" for c in codes]
-        if multiple_codes:
-            lines += ["", "Each code activates one separate license — share the different codes among your team's guides."]
-
-    lines += [
-        "",
-        "Getting started:",
-        "1. Download the VoiceGuide AirLink app on your phone (links below).",
-        "2. Open the app, choose \"Guide\" and tap \"Activate License\": enter one of the codes above.",
-        "3. Tap \"Start New Tour\": the app will generate a PIN.",
-        "4. Have your guests download the app too (same link) and give them the PIN to join, choosing \"Guest\".",
-        "",
-        "Tip: for better audio quality, we recommend a small microphone for the guide and earbuds/headphones for the guests.",
-        "",
-        f"Google Play: {PLAY_STORE_URL}",
-        f"App Store: {APP_STORE_URL}",
-        "",
-        "Good to know: these licenses are not tied to a specific person — you can share them with other guides on your team if needed.",
-        "",
-        "Questions? Reply to this email or reach us on WhatsApp:",
-        WHATSAPP_URL,
-        "",
-        "Best regards,",
-        "VoiceGuide Team",
-    ]
-    text_body = "\n".join(lines)
-
-    # HTML: blocco copiabile + (opzionale) lista
-    license_html = ""
-    if codes:
-        safe_codes_text = "\n".join(codes)
-        safe_codes_pre = escape(safe_codes_text)
-
-        lis = "\n".join([f"<li style='margin:4px 0;'><code>{escape(c)}</code></li>" for c in codes])
-
-        multi_note_html = (
-            """<p style="margin:10px 0 0 0;color:#444;">Each code activates one separate license — share the different codes among your team's guides.</p>"""
-            if multiple_codes
-            else ""
-        )
-
-        license_html = f"""
-        <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
-          <div style="font-size:12px;color:#666;margin-bottom:10px;">Your License Code(s)</div>
-
-          <div style="margin-bottom:10px;">
-            <div style="font-size:12px;color:#666;margin-bottom:6px;">Copy &amp; paste</div>
-            <pre style="margin:0;padding:12px;border-radius:10px;background:#fafafa;border:1px solid #eee;white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.5;">{safe_codes_pre}</pre>
-          </div>
-
-          <div style="font-size:12px;color:#666;margin:12px 0 6px 0;">List</div>
-          <ul style="margin:0;padding-left:18px;">
-            {lis}
-          </ul>
-          {multi_note_html}
-        </div>
-        """.strip()
-
-    html_body = f"""
-    <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
-      <p>Hello,</p>
-      <p>Your payment has been <b>confirmed</b>.</p>
-
-      <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
-        <div style="font-size:12px;color:#666;margin-bottom:6px;">Order details</div>
-        <div style="font-size:14px;">
-          <b>Order ID:</b> {order_id}<br/>
-          {"<b>Product:</b> " + escape(friendly_product) + "<br/>" if friendly_product else ""}
-          <b>Status:</b> PAID
-        </div>
-      </div>
-
-      {license_html}
-
-      <p style="margin:0 0 6px 0;"><b>Getting started:</b></p>
-      <ol style="margin:0 0 12px 0;padding-left:20px;">
-        <li>Download the VoiceGuide AirLink app on your phone (link below).</li>
-        <li>Open the app, choose "Guide" and tap "Activate License": enter one of the codes above.</li>
-        <li>Tap "Start New Tour": the app will generate a PIN.</li>
-        <li>Have your guests download the app too (same link) and give them the PIN to join, choosing "Guest".</li>
-      </ol>
-
-      <p style="margin:0 0 16px 0;color:#444;">
-        💡 Tip: for better audio quality, we recommend a small microphone for the guide and earbuds/headphones for the guests.
-      </p>
-
-      <p style="margin:0 0 16px 0;">
-        📱 <a href="{PLAY_STORE_URL}">Google Play</a> &nbsp;|&nbsp;
-        🍏 <a href="{APP_STORE_URL}">App Store</a>
-      </p>
-
-      <p style="margin:0 0 16px 0;color:#444;">
-        Good to know: these licenses are <b>not tied to a specific person</b> — you can share them with other guides on your team if needed.
-      </p>
-
-      <p>Questions? Reply to this email or reach us on <a href="{WHATSAPP_URL}">WhatsApp</a>.</p>
-      <p style="margin-top:18px;color:#444;">Best regards,<br/><b>VoiceGuide Team</b></p>
-    </div>
-    """.strip()
-
-    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=html_body)

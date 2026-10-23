@@ -122,12 +122,16 @@ def _product_label_for_email(order: Order, package: Optional[Package]) -> str:
     if order.order_type == OrderType.SINGLE:
         mg = int(package.max_guests) if package else 0
         return f"SINGLE_{mg}"
+    # "NxG" = N licenze da G ospiti: serve all'email per distinguere il
+    # Tour Operator (10x25) dai "5 Tour" (5x25/5x35/5x50), stesso package_type TO.
     if order.order_type == OrderType.PACKAGE_TO:
         nl = int(package.num_licenses) if package else int(order.quantity or 0)
-        return f"PACKAGE_TO_{nl}"
+        mg = int(package.max_guests) if package else 25
+        return f"PACKAGE_TO_{nl}x{mg}"
     if order.order_type == OrderType.PACKAGE_SCHOOL:
         nl = int(package.num_licenses) if package else int(order.quantity or 0)
-        return f"PACKAGE_SCHOOL_{nl}"
+        mg = int(package.max_guests) if package else 100
+        return f"PACKAGE_SCHOOL_{nl}x{mg}"
     return str(order.order_type.value)
 
 
@@ -168,6 +172,7 @@ def _send_payment_email_safe(
             product=product,
             license_code=license_code,      # retro-compatibilità
             license_codes=license_codes,    # ✅ multi
+            language=getattr(order, "language", None),  # lingua del sito all'acquisto
         )
         logger.info("EMAIL: OK order_id=%s to=%s", order.id, order.buyer_email)
     except Exception as e:

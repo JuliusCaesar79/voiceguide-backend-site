@@ -79,6 +79,10 @@ class Order(Base):
     # Codice referral usato (storico puro)
     referral_code = Column(String(100), nullable=True)
 
+    # Lingua del sito al momento dell'acquisto (it/en/fr/es/de): serve a
+    # mandare l'email con i codici nella lingua del cliente. NULL = ordini vecchi.
+    language = Column(String(5), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # ==============================

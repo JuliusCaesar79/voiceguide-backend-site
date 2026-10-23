@@ -8,7 +8,7 @@ import os
 from html import escape
 
 from app.email_service import _send_email
-from app.free_tours_emails import _layout
+from app.email_layout import layout as _layout
 
 TEXTS = {
     "it": ("Abbiamo ricevuto la tua candidatura", "Grazie {name}! Abbiamo ricevuto la tua candidatura al programma partner di VoiceGuide AirLink. La valutiamo e ti rispondiamo in ogni caso via email. Se viene approvata, riceverai il tuo codice partner personale.", "Il team VoiceGuide"),

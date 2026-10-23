@@ -7,10 +7,10 @@ Stile del sito rinnovato (fondo crema, giallo VoiceGuide).
 """
 from html import escape
 
-from app.email_service import APP_STORE_URL, PLAY_STORE_URL, WHATSAPP_URL, _send_email
+from app.email_layout import APP_STORE_URL, PLAY_STORE_URL, STEPS, WHATSAPP_URL, layout
+from app.email_service import _send_email
 
 SITE_URL = "https://www.voiceguideapp.com"
-LOGO_URL = f"{SITE_URL}/brand/voiceguide-airlink-logo.png"
 
 TEXTS = {
     "it": {
@@ -23,12 +23,6 @@ TEXTS = {
         "lic_intro": "Grazie per esserti registrato! Questi sono i tuoi codici licenza. Non scadono: usali quando vuoi.",
         "guests": "Fino a {n} ospiti",
         "how_title": "Come si usa",
-        "steps": [
-            "Scarica l'app VoiceGuide AirLink (link qui sotto).",
-            "Apri l'app, scegli \"Guida\" e inserisci uno dei codici.",
-            "Tocca \"Avvia Nuovo Tour\": l'app crea un PIN da dare al gruppo.",
-            "Gli ospiti scaricano l'app, scelgono \"Ospite\" e inseriscono il PIN.",
-        ],
         "notes": "Ogni licenza vale per un tour fino a 4 ore, che partono quando inserisci il codice nell'app. Le licenze non sono nominative: puoi passarle a un collega.",
         "buy": "Vedi i prezzi",
         "help": "Domande? Rispondi a questa email o scrivici su WhatsApp.",
@@ -44,12 +38,6 @@ TEXTS = {
         "lic_intro": "Thanks for signing up! These are your license codes. They never expire: use them whenever you like.",
         "guests": "Up to {n} guests",
         "how_title": "How to use them",
-        "steps": [
-            "Download the VoiceGuide AirLink app (links below).",
-            "Open the app, choose \"Guide\" and enter one of the codes.",
-            "Tap \"Start New Tour\": the app creates a PIN for your group.",
-            "Guests download the app, choose \"Guest\" and enter the PIN.",
-        ],
         "notes": "Each license covers one tour of up to 4 hours, starting when you enter the code in the app. Licenses aren't tied to a person: you can pass them to a colleague.",
         "buy": "See pricing",
         "help": "Questions? Reply to this email or message us on WhatsApp.",
@@ -65,12 +53,6 @@ TEXTS = {
         "lic_intro": "Merci pour votre inscription ! Voici vos codes de licence. Ils n'expirent pas : utilisez-les quand vous voulez.",
         "guests": "Jusqu'à {n} participants",
         "how_title": "Comment les utiliser",
-        "steps": [
-            "Téléchargez l'application VoiceGuide AirLink (liens ci-dessous).",
-            "Ouvrez l'application, choisissez « Guide » et saisissez l'un des codes.",
-            "Touchez « Démarrer une Nouvelle Visite » : l'application crée un PIN pour le groupe.",
-            "Les participants téléchargent l'application, choisissent « Invité » et saisissent le PIN.",
-        ],
         "notes": "Chaque licence vaut pour une visite jusqu'à 4 heures, qui commencent quand vous saisissez le code dans l'application. Les licences ne sont pas nominatives : vous pouvez les transmettre à un collègue.",
         "buy": "Voir les tarifs",
         "help": "Des questions ? Répondez à cet e-mail ou écrivez-nous sur WhatsApp.",
@@ -86,12 +68,6 @@ TEXTS = {
         "lic_intro": "¡Gracias por registrarte! Estos son tus códigos de licencia. No caducan: úsalos cuando quieras.",
         "guests": "Hasta {n} participantes",
         "how_title": "Cómo usarlos",
-        "steps": [
-            "Descarga la app VoiceGuide AirLink (enlaces abajo).",
-            "Abre la app, elige \"Guía\" e introduce uno de los códigos.",
-            "Toca \"Iniciar Nuevo Tour\": la app crea un PIN para el grupo.",
-            "Los participantes descargan la app, eligen \"Invitado\" e introducen el PIN.",
-        ],
         "notes": "Cada licencia vale para un tour de hasta 4 horas, que empiezan cuando introduces el código en la app. Las licencias no son nominativas: puedes pasárselas a un compañero.",
         "buy": "Ver precios",
         "help": "¿Dudas? Responde a este email o escríbenos por WhatsApp.",
@@ -107,12 +83,6 @@ TEXTS = {
         "lic_intro": "Danke für Ihre Registrierung! Das sind Ihre Lizenzcodes. Sie verfallen nicht: Nutzen Sie sie, wann Sie wollen.",
         "guests": "Bis zu {n} Gäste",
         "how_title": "So nutzen Sie sie",
-        "steps": [
-            "Laden Sie die App VoiceGuide AirLink herunter (Links unten).",
-            "Öffnen Sie die App, wählen Sie „Guide“ und geben Sie einen der Codes ein.",
-            "Tippen Sie auf „Neue Tour Starten“: Die App erstellt eine PIN für die Gruppe.",
-            "Die Gäste laden die App herunter, wählen „Gast“ und geben die PIN ein.",
-        ],
         "notes": "Jede Lizenz gilt für eine Tour bis zu 4 Stunden, die ab der Eingabe des Codes in der App laufen. Die Lizenzen sind nicht personengebunden: Sie können sie an Kollegen weitergeben.",
         "buy": "Preise ansehen",
         "help": "Fragen? Antworten Sie auf diese E-Mail oder schreiben Sie uns auf WhatsApp.",
@@ -129,31 +99,8 @@ def _t(language: str) -> tuple[str, dict]:
 
 
 def _layout(title: str, inner_html: str, lang: str) -> str:
-    """Contenitore comune: logo, scheda bianca su fondo crema, link store."""
-    return f"""<!doctype html>
-<html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#FBF8F1;">
-<div style="background:#FBF8F1;padding:28px 12px;font-family:Arial,Helvetica,sans-serif;color:#14161B;">
-  <div style="max-width:560px;margin:0 auto;">
-    <div style="text-align:center;margin-bottom:18px;">
-      <a href="{SITE_URL}/{lang}"><img src="{LOGO_URL}" alt="VoiceGuide AirLink" width="130" style="width:130px;height:auto;border:0;"></a>
-    </div>
-    <div style="background:#FFFFFF;border-radius:22px;overflow:hidden;border:1px solid #EEE7D6;box-shadow:0 10px 30px rgba(20,22,27,0.06);">
-      <div style="height:8px;background:#FFC226;line-height:8px;font-size:0;">&nbsp;</div>
-      <div style="padding:30px 28px;">
-        <h1 style="margin:0 0 14px;font-size:24px;line-height:1.2;letter-spacing:-0.5px;">{escape(title)}</h1>
-        {inner_html}
-      </div>
-    </div>
-    <div style="text-align:center;margin-top:20px;font-size:13px;color:#5A5F6B;line-height:1.8;">
-      <a href="{APP_STORE_URL}" style="color:#14161B;margin:0 8px;">App Store</a>
-      <a href="{PLAY_STORE_URL}" style="color:#14161B;margin:0 8px;">Google Play</a>
-      <a href="{WHATSAPP_URL}" style="color:#14161B;margin:0 8px;">WhatsApp</a><br>
-      <a href="{SITE_URL}/{lang}" style="color:#5A5F6B;text-decoration:none;">VoiceGuide AirLink · voiceguideapp.com</a>
-    </div>
-  </div>
-</div>
-</body></html>"""
+    """Contenitore comune (app/email_layout.py)."""
+    return layout(title, inner_html, lang)
 
 
 def send_free_tours_code_email(to_email: str, code: str, language: str = "it") -> None:
@@ -190,7 +137,7 @@ def send_free_tours_licenses_email(
         </tr>"""
         for code, n in licenses
     )
-    steps = "".join(f"<li style=\"margin:0 0 6px;\">{escape(s)}</li>" for s in t["steps"])
+    steps = "".join(f"<li style=\"margin:0 0 6px;\">{escape(s)}</li>" for s in STEPS[lang])
 
     inner = f"""
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#4A4F5A;">{escape(t["lic_intro"])}</p>
@@ -211,7 +158,7 @@ def send_free_tours_licenses_email(
     text_lines = [t["lic_title"], "", t["lic_intro"], ""]
     text_lines += [f"{code} — {t['guests'].format(n=n)}" for code, n in licenses]
     text_lines += ["", t["how_title"]]
-    text_lines += [f"{i}. {s}" for i, s in enumerate(t["steps"], 1)]
+    text_lines += [f"{i}. {s}" for i, s in enumerate(STEPS[lang], 1)]
     text_lines += ["", t["notes"], "", f"App Store: {APP_STORE_URL}", f"Google Play: {PLAY_STORE_URL}", "", t["help"], WHATSAPP_URL, "", t["signoff"]]
 
     _send_email(

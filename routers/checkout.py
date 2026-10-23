@@ -494,6 +494,7 @@ def create_order_real(data: CheckoutIntent, db: Session = Depends(get_db)):
 
         partner_id=(partner.id if partner else None),
         referral_code=(data.customer.partner_code.strip() if (partner and data.customer.partner_code) else None),
+        language=lang,
     )
 
     db.add(order)
