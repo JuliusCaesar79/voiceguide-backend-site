@@ -16,6 +16,8 @@ from routers import purchase, auth_partner
 from routers import auth_admin, admin, payouts_admin, admin_partners
 from routers import partner_portal, partner_payments_admin, admin_licenses
 from routers import trial_requests, admin_trial_requests, free_tours, admin_free_tours
+from routers import free_tours_unsubscribe
+from app.free_tours_reminders import start_reminder_loop
 from routers import admin_partner_requests, partner_requests
 from routers import checkout
 from routers import stripe_webhook  # ✅ Webhooks Stripe
@@ -89,6 +91,7 @@ app.include_router(trial_requests.router)
 app.include_router(admin_trial_requests.router)
 app.include_router(free_tours.router)
 app.include_router(admin_free_tours.router)
+app.include_router(free_tours_unsubscribe.router)
 
 app.include_router(admin_partner_requests.router)
 app.include_router(partner_requests.router)
@@ -103,6 +106,13 @@ app.include_router(stripe_webhook.router)  # ✅ webhooks
 @app.get("/")
 def root():
     return {"message": "Backend VoiceGuide Sito attivo e pronto!"}
+
+
+# Promemoria a 7 giorni per i tour gratuiti non usati (app/free_tours_reminders.py)
+@app.on_event("startup")
+async def free_tours_reminders():
+    if os.getenv("FREE_TOURS_REMINDERS") == "1":
+        start_reminder_loop()
 
 
 @app.get("/health")

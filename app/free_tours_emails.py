@@ -167,3 +167,144 @@ def send_free_tours_licenses_email(
         text_body="\n".join(text_lines),
         html_body=_layout(t["lic_title"], inner, lang),
     )
+
+
+# ---------------------------------------------------------------------------
+# Promemoria a 7 giorni (app/free_tours_reminders.py): solo a chi non ha
+# ancora usato nessuno dei 3 codici. Testo neutro: niente "gratis" in oggetto.
+# ---------------------------------------------------------------------------
+REMINDER = {
+    "it": {
+        "subject": "I tuoi 3 tour VoiceGuide ti aspettano",
+        "title": "I tuoi 3 tour ti aspettano",
+        "intro": "Qualche giorno fa hai ricevuto i tuoi codici VoiceGuide AirLink, ma non li hai ancora usati. Nessuna fretta: non scadono.",
+        "video": "Guarda come funziona (30 secondi)",
+        "codes": "I tuoi codici",
+        "tip_title": "Un consiglio per iniziare",
+        "tip": "Fai una prova a casa con un amico: tu sei la guida, lui l'ospite. Usa il codice da 5 ospiti: bastano due telefoni e 5 minuti.",
+        "help": "Qualcosa non ti è chiaro? Rispondi a questa email: ti risponde una persona del team.",
+        "unsub": "Non vuoi ricevere altri promemoria?",
+        "unsub_link": "Disiscriviti",
+    },
+    "en": {
+        "subject": "Your 3 VoiceGuide tours are waiting",
+        "title": "Your 3 tours are waiting",
+        "intro": "A few days ago you received your VoiceGuide AirLink codes, but you haven't used them yet. No rush: they never expire.",
+        "video": "Watch how it works (30 seconds)",
+        "codes": "Your codes",
+        "tip_title": "A tip to get started",
+        "tip": "Try it at home with a friend: you're the guide, they're the guest. Use the 5-guest code: all you need is two phones and 5 minutes.",
+        "help": "Anything unclear? Just reply to this email: a real person from our team will answer.",
+        "unsub": "Don't want any more reminders?",
+        "unsub_link": "Unsubscribe",
+    },
+    "fr": {
+        "subject": "Vos 3 visites VoiceGuide vous attendent",
+        "title": "Vos 3 visites vous attendent",
+        "intro": "Il y a quelques jours, vous avez reçu vos codes VoiceGuide AirLink, mais vous ne les avez pas encore utilisés. Rien ne presse : ils n'expirent pas.",
+        "video": "Voir comment ça marche (30 secondes)",
+        "codes": "Vos codes",
+        "tip_title": "Un conseil pour commencer",
+        "tip": "Faites un essai chez vous avec un ami : vous êtes le guide, il est l'invité. Utilisez le code 5 participants : deux téléphones et 5 minutes suffisent.",
+        "help": "Quelque chose n'est pas clair ? Répondez simplement à cet e-mail : une vraie personne de l'équipe vous répondra.",
+        "unsub": "Vous ne voulez plus recevoir de rappels ?",
+        "unsub_link": "Se désinscrire",
+    },
+    "es": {
+        "subject": "Tus 3 tours de VoiceGuide te esperan",
+        "title": "Tus 3 tours te esperan",
+        "intro": "Hace unos días recibiste tus códigos de VoiceGuide AirLink, pero todavía no los has usado. Sin prisa: no caducan.",
+        "video": "Mira cómo funciona (30 segundos)",
+        "codes": "Tus códigos",
+        "tip_title": "Un consejo para empezar",
+        "tip": "Haz una prueba en casa con un amigo: tú eres el guía y él, el invitado. Usa el código de 5 participantes: bastan dos teléfonos y 5 minutos.",
+        "help": "¿Algo no está claro? Responde a este email: te contestará una persona del equipo.",
+        "unsub": "¿No quieres recibir más recordatorios?",
+        "unsub_link": "Darte de baja",
+    },
+    "de": {
+        "subject": "Ihre 3 VoiceGuide-Touren warten auf Sie",
+        "title": "Ihre 3 Touren warten auf Sie",
+        "intro": "Vor ein paar Tagen haben Sie Ihre Codes für VoiceGuide AirLink erhalten, sie aber noch nicht genutzt. Keine Eile: Sie verfallen nicht.",
+        "video": "So funktioniert es (30 Sekunden)",
+        "codes": "Ihre Codes",
+        "tip_title": "Ein Tipp für den Anfang",
+        "tip": "Probieren Sie es zu Hause mit einem Freund aus: Sie sind der Guide, er ist der Gast. Nehmen Sie den Code für 5 Gäste: Zwei Handys und 5 Minuten genügen.",
+        "help": "Ist etwas unklar? Antworten Sie einfach auf diese E-Mail: Es antwortet Ihnen ein Mensch aus unserem Team.",
+        "unsub": "Sie möchten keine Erinnerungen mehr?",
+        "unsub_link": "Abmelden",
+    },
+}
+
+
+def build_free_tours_reminder_email(
+    licenses: list[tuple[str, int]],
+    language: str,
+    unsubscribe_url: str,
+) -> tuple[str, str, str]:
+    """(oggetto, testo, html) del promemoria; separato dall'invio per l'anteprima."""
+    lang, t = _t(language)
+    r = REMINDER[lang]
+    video_url = f"{SITE_URL}/video/spot-{lang}.mp4"
+    poster_url = f"{SITE_URL}/video/spot-{lang}.jpg"
+
+    rows = "".join(
+        f"""<tr>
+          <td style="padding:10px 12px;border-bottom:1px solid #F1EBDD;font-size:18px;font-weight:bold;letter-spacing:1px;">{escape(code)}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid #F1EBDD;font-size:14px;color:#4A4F5A;text-align:right;white-space:nowrap;">{escape(t["guests"].format(n=n))}</td>
+        </tr>"""
+        for code, n in licenses
+    )
+    steps = "".join(f"<li style=\"margin:0 0 6px;\">{escape(s)}</li>" for s in STEPS[lang])
+
+    inner = f"""
+      <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#4A4F5A;">{escape(r["intro"])}</p>
+      <div style="text-align:center;margin:0 0 22px;">
+        <a href="{video_url}" style="text-decoration:none;color:#14161B;">
+          <img src="{poster_url}" alt="{escape(r["video"])}" width="180" style="width:180px;height:auto;border:0;border-radius:16px;display:block;margin:0 auto 10px;">
+          <span style="display:inline-block;background:#FFC226;color:#14161B;font-weight:bold;font-size:14px;padding:11px 18px;border-radius:999px;">&#9654; {escape(r["video"])}</span>
+        </a>
+      </div>
+      <p style="margin:0 0 8px;font-size:15px;font-weight:bold;">{escape(r["codes"])}</p>
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#FFF8E6;border:2px solid #F2C94C;border-radius:14px;margin:0 0 20px;">
+        {rows}
+      </table>
+      <p style="margin:0 0 6px;font-size:15px;font-weight:bold;">{escape(r["tip_title"])}</p>
+      <p style="margin:0 0 18px;font-size:14px;line-height:1.55;color:#4A4F5A;">{escape(r["tip"])}</p>
+      <p style="margin:0 0 8px;font-size:15px;font-weight:bold;">{escape(t["how_title"])}</p>
+      <ol style="margin:0 0 18px;padding-left:20px;font-size:14px;line-height:1.55;color:#2A2E36;">{steps}</ol>
+      <p style="margin:0 0 20px;">
+        <a href="{APP_STORE_URL}" style="display:inline-block;background:#14161B;color:#FFFFFF;text-decoration:none;font-weight:bold;font-size:14px;padding:12px 18px;border-radius:999px;margin:0 6px 6px 0;">App Store</a>
+        <a href="{PLAY_STORE_URL}" style="display:inline-block;background:#14161B;color:#FFFFFF;text-decoration:none;font-weight:bold;font-size:14px;padding:12px 18px;border-radius:999px;margin:0 6px 6px 0;">Google Play</a>
+      </p>
+      <p style="margin:0 0 20px;font-size:14px;line-height:1.55;color:#4A4F5A;">{escape(r["help"])}</p>
+      <p style="margin:0 0 20px;font-size:14px;color:#14161B;">{escape(t["signoff"])}</p>
+      <p style="margin:0;font-size:12px;line-height:1.5;color:#8A8F99;">{escape(r["unsub"])} <a href="{escape(unsubscribe_url)}" style="color:#8A8F99;">{escape(r["unsub_link"])}</a></p>
+    """
+    text_lines = [r["title"], "", r["intro"], "", f"{r['video']}: {video_url}", "", r["codes"]]
+    text_lines += [f"{code} — {t['guests'].format(n=n)}" for code, n in licenses]
+    text_lines += ["", r["tip_title"], r["tip"], "", t["how_title"]]
+    text_lines += [f"{i}. {s}" for i, s in enumerate(STEPS[lang], 1)]
+    text_lines += ["", f"App Store: {APP_STORE_URL}", f"Google Play: {PLAY_STORE_URL}", "", r["help"], "", t["signoff"]]
+    text_lines += ["", f"{r['unsub']} {unsubscribe_url}"]
+
+    return r["subject"], "\n".join(text_lines), _layout(r["title"], inner, lang)
+
+
+def send_free_tours_reminder_email(
+    to_email: str,
+    licenses: list[tuple[str, int]],
+    language: str,
+    unsubscribe_url: str,
+) -> None:
+    subject, text, html = build_free_tours_reminder_email(licenses, language, unsubscribe_url)
+    _send_email(
+        to_email=to_email,
+        subject=subject,
+        text_body=text,
+        html_body=html,
+        headers={
+            "List-Unsubscribe": f"<{unsubscribe_url}>",
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        },
+    )

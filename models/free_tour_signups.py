@@ -38,3 +38,8 @@ class FreeTourSignup(Base):
 
     # Codici emessi, separati da virgola (es. "VG-LIC-AAAA,VG-LIC-BBBB,...")
     license_codes = Column(Text, nullable=True)
+
+    # Promemoria a 7 giorni per chi non ha ancora usato nessun codice
+    # (app/free_tours_reminders.py) e disiscrizione dai promemoria.
+    reminder_sent_at = Column(DateTime(timezone=True), nullable=True)
+    emails_opt_out_at = Column(DateTime(timezone=True), nullable=True)

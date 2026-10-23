@@ -62,9 +62,10 @@ def _send_email(
     subject: str,
     text_body: str,
     html_body: str | None = None,
+    headers: dict[str, str] | None = None,
 ) -> None:
     """
-    Invio email.
+    Invio email. headers: intestazioni extra (es. List-Unsubscribe).
     Provider selezionabile via env:
     - EMAIL_PROVIDER=resend  (consigliato in produzione)
     - EMAIL_PROVIDER=smtp    (fallback)
@@ -100,6 +101,8 @@ def _send_email(
             payload["html"] = html_body
         if reply_to:
             payload["reply_to"] = reply_to
+        if headers:
+            payload["headers"] = headers
 
         r = requests.post(
             "https://api.resend.com/emails",
@@ -144,6 +147,8 @@ def _send_email(
     msg["Subject"] = subject
     if reply_to:
         msg["Reply-To"] = reply_to
+    for k, v in (headers or {}).items():
+        msg[k] = v
 
     msg.set_content(text_body)
     if html_body:
