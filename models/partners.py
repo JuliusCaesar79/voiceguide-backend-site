@@ -29,6 +29,9 @@ class Partner(Base):
 
     notes = Column(String(1000), nullable=True)
 
+    # Lingua del sito da cui si e' candidato: serve per le email (it/en/fr/es/de).
+    language = Column(String(5), nullable=True)
+
     # In futuro potremo marcare partner attivo/disattivato
     is_active = Column(Boolean, nullable=False, default=True)
 

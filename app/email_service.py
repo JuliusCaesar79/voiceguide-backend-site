@@ -27,7 +27,6 @@ APP_STORE_URL = "https://apps.apple.com/it/app/voiceguide-airlink/id6757807346"
 PURCHASE_PAGE_URL = "https://www.voiceguideapp.com/en/licenze"
 PARTNER_DISCOUNT_CODE = "VG-1F0DC4"
 WHATSAPP_URL = "https://wa.me/393755908650"
-PARTNER_PORTAL_URL = "https://voiceguide-partner-production.up.railway.app"
 
 
 def _friendly_product_label(product_code: str, language: str = "en") -> str:
@@ -164,14 +163,6 @@ def _send_email(
         server.send_message(msg)
 
 
-def _branded(subject: str, html_body: str) -> str:
-    """Mette il contenuto nel layout comune (logo, scheda, piè di pagina). Email partner: in inglese."""
-    from app.email_layout import layout
-
-    title = subject.split("—", 1)[-1].strip().rstrip("✅").strip()
-    return layout(title, html_body, "en")
-
-
 # ✅ Manteniamo la funzione esistente (compatibilità)
 def send_receipt_email(
     to_email: str,
@@ -211,7 +202,7 @@ def send_order_received_email(
 
 
 # -------------------------------------------------
-# PARTNER REQUEST EMAILS (APPROVE / REJECT) - ENGLISH
+# PARTNER EMAILS (APPROVE / REJECT / TIER / CLOSE): in 5 lingue in app/partner_emails.py
 # -------------------------------------------------
 def send_partner_request_approved_email(
     to_email: str,
@@ -219,262 +210,45 @@ def send_partner_request_approved_email(
     partner_name: str | None = None,
     commission_pct: str | None = None,
     tier: str | None = None,
+    language: str | None = None,
 ) -> None:
-    name = (partner_name or "Partner").strip()
-    safe_name = escape(name)
-    safe_code = escape(referral_code)
+    from app.partner_emails import send_partner_approved_email
 
-    subject = "VoiceGuide — Partner Request Approved ✅"
-
-    # TEXT (EN)
-    lines = [
-        f"Hello {name},",
-        "",
-        "We are pleased to inform you that your request to become a VoiceGuide Partner has been approved.",
-        "",
-        "Your Partner Code is:",
-        f"{referral_code}",
-    ]
-    if tier:
-        lines.append(f"Tier: {tier}")
-    if commission_pct:
-        lines.append(f"Commission: {commission_pct}%")
-    lines += [
-        "",
-        "You can share this code with your clients during the purchase process.",
-        "",
-        "Log in to your Partner Dashboard to track your orders and commissions:",
-        PARTNER_PORTAL_URL,
-        "(use your email and the Partner Code above to log in)",
-        "",
-        "If you have any questions, simply reply to this email or reach us on WhatsApp:",
-        WHATSAPP_URL,
-        "",
-        "Best regards,",
-        "VoiceGuide Team",
-    ]
-    text_body = "\n".join(lines)
-
-    # HTML (EN)
-    html_extra = ""
-    if tier or commission_pct:
-        html_extra = "<p style='margin:0 0 12px 0;'>"
-        if tier:
-            html_extra += f"<b>Tier:</b> {escape(str(tier))}<br/>"
-        if commission_pct:
-            html_extra += f"<b>Commission:</b> {escape(str(commission_pct))}%"
-        html_extra += "</p>"
-
-    html_body = f"""
-    <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
-      <p>Hello <b>{safe_name}</b>,</p>
-
-      <p>We are pleased to inform you that your request to become a <b>VoiceGuide Partner</b> has been approved.</p>
-
-      <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
-        <div style="font-size:12px;color:#666;margin-bottom:6px;">Your Partner Code</div>
-        <div style="font-size:22px;letter-spacing:1px;"><b>{safe_code}</b></div>
-      </div>
-
-      {html_extra}
-
-      <p>You can share this code with your clients during the purchase process.</p>
-
-      <div style="padding:14px;border:1px solid #FFC226;border-radius:10px;margin:16px 0;background:#FFFBEF;">
-        <p style="margin:0 0 8px 0;">Log in to your Partner Dashboard to track your orders and commissions.</p>
-        <p style="margin:0 0 8px 0;"><a href="{PARTNER_PORTAL_URL}"><b>Open Partner Dashboard →</b></a></p>
-        <p style="margin:0;color:#666;font-size:13px;">(use your email and the Partner Code above to log in)</p>
-      </div>
-
-      <p>If you have any questions, simply reply to this email or reach us on <a href="{WHATSAPP_URL}">WhatsApp</a>.</p>
-
-      <p style="margin-top:18px;color:#444;">Best regards,<br/><b>VoiceGuide Team</b></p>
-    </div>
-    """.strip()
-
-    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=_branded(subject, html_body))
+    send_partner_approved_email(to_email, referral_code, partner_name, commission_pct, tier, language)
 
 
 def send_partner_request_rejected_email(
     to_email: str,
     partner_name: str | None = None,
+    language: str | None = None,
 ) -> None:
-    name = (partner_name or "Partner").strip()
-    safe_name = escape(name)
+    from app.partner_emails import send_partner_rejected_email
 
-    subject = "VoiceGuide — Partner Request Update"
-
-    # TEXT (EN)
-    text_body = "\n".join(
-        [
-            f"Hello {name},",
-            "",
-            "Thank you for your interest in becoming a VoiceGuide Partner.",
-            "",
-            "After reviewing your request, we are unable to approve it at this time.",
-            "",
-            "If you would like further information or wish to submit a new request in the future, feel free to reply to this email or reach us on WhatsApp:",
-            WHATSAPP_URL,
-            "",
-            "Kind regards,",
-            "VoiceGuide Team",
-        ]
-    )
-
-    # HTML (EN)
-    html_body = f"""
-    <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
-      <p>Hello <b>{safe_name}</b>,</p>
-
-      <p>Thank you for your interest in becoming a <b>VoiceGuide Partner</b>.</p>
-
-      <p>After reviewing your request, we are unable to approve it at this time.</p>
-
-      <p>If you would like further information or wish to submit a new request in the future, feel free to reply to this email or reach us on <a href="{WHATSAPP_URL}">WhatsApp</a>.</p>
-
-      <p style="margin-top:18px;color:#444;">Kind regards,<br/><b>VoiceGuide Team</b></p>
-    </div>
-    """.strip()
-
-    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=_branded(subject, html_body))
+    send_partner_rejected_email(to_email, partner_name, language)
 
 
-# -------------------------------------------------
-# PARTNER ADMIN EMAILS (TIER CHANGE / COLLAB CLOSE) - ENGLISH
-# -------------------------------------------------
 def send_partner_tier_changed_email(
     to_email: str,
     partner_name: str | None = None,
     old_tier: str | None = None,
     new_tier: str | None = None,
     commission_pct: str | None = None,
+    language: str | None = None,
 ) -> None:
-    """
-    Email inviata quando un admin cambia il tier del partner (promozione/declassamento).
-    """
-    name = (partner_name or "Partner").strip()
-    safe_name = escape(name)
-    safe_old = escape(str(old_tier or ""))
-    safe_new = escape(str(new_tier or ""))
-    safe_comm = escape(str(commission_pct or ""))
+    from app.partner_emails import send_partner_tier_email
 
-    subject = "VoiceGuide — Partner Tier Updated"
-
-    # TEXT (EN)
-    lines = [
-        f"Hello {name},",
-        "",
-        "Your VoiceGuide Partner tier has been updated by our admin team.",
-        "",
-    ]
-    if old_tier and new_tier:
-        lines.append(f"Tier: {old_tier} → {new_tier}")
-    elif new_tier:
-        lines.append(f"New tier: {new_tier}")
-    if commission_pct:
-        lines.append(f"Commission: {commission_pct}%")
-    lines += [
-        "",
-        "If you have any questions, simply reply to this email or reach us on WhatsApp:",
-        WHATSAPP_URL,
-        "",
-        "Best regards,",
-        "VoiceGuide Team",
-    ]
-    text_body = "\n".join(lines)
-
-    # HTML (EN)
-    html_body = f"""
-    <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
-      <p>Hello <b>{safe_name}</b>,</p>
-
-      <p>Your <b>VoiceGuide Partner</b> tier has been updated by our admin team.</p>
-
-      <div style="padding:14px;border:1px solid #e5e5e5;border-radius:10px;margin:16px 0;">
-        <div style="font-size:12px;color:#666;margin-bottom:6px;">Update details</div>
-        <div style="font-size:14px;">
-          {"<b>Tier:</b> " + safe_old + " → " + safe_new + "<br/>" if (old_tier and new_tier) else ""}
-          {"<b>New tier:</b> " + safe_new + "<br/>" if (new_tier and not old_tier) else ""}
-          {"<b>Commission:</b> " + safe_comm + "%<br/>" if commission_pct else ""}
-        </div>
-      </div>
-
-      <p>If you have any questions, simply reply to this email or reach us on <a href="{WHATSAPP_URL}">WhatsApp</a>.</p>
-
-      <p style="margin-top:18px;color:#444;">Best regards,<br/><b>VoiceGuide Team</b></p>
-    </div>
-    """.strip()
-
-    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=_branded(subject, html_body))
+    send_partner_tier_email(to_email, partner_name, old_tier, new_tier, commission_pct, language)
 
 
 def send_partner_collaboration_closed_email(
     to_email: str,
     partner_name: str | None = None,
     reason: str | None = None,
+    language: str | None = None,
 ) -> None:
-    """
-    Email inviata quando un admin disattiva un partner (chiusura collaborazione).
-    """
-    name = (partner_name or "Partner").strip()
-    safe_name = escape(name)
-    safe_reason = escape(reason.strip()) if reason else ""
+    from app.partner_emails import send_partner_closed_email
 
-    subject = "VoiceGuide — Collaboration Update"
-
-    # TEXT (EN)
-    lines = [
-        f"Hello {name},",
-        "",
-        "We want to thank you for your collaboration as a VoiceGuide Partner.",
-        "",
-        "Your partner collaboration has been set to inactive by our admin team.",
-    ]
-    if reason and reason.strip():
-        lines += ["", f"Reason: {reason.strip()}"]
-    lines += [
-        "",
-        "If you believe this is a mistake or you need further details, simply reply to this email or reach us on WhatsApp:",
-        WHATSAPP_URL,
-        "",
-        "Thank you again for the time we spent working together.",
-        "",
-        "Kind regards,",
-        "VoiceGuide Team",
-    ]
-    text_body = "\n".join(lines)
-
-    # HTML (EN)
-    reason_html = ""
-    if safe_reason:
-        reason_html = f"""
-        <div style="margin-top:10px;padding:12px;border-radius:10px;background:#fafafa;border:1px solid #eaeaea;">
-          <div style="font-size:12px;color:#666;margin-bottom:6px;">Reason</div>
-          <div style="font-size:14px;color:#111;">{safe_reason}</div>
-        </div>
-        """.strip()
-
-    html_body = f"""
-    <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#111;">
-      <p>Hello <b>{safe_name}</b>,</p>
-
-      <p>We want to thank you for your collaboration as a <b>VoiceGuide Partner</b>.</p>
-
-      <p>Your partner collaboration has been set to <b>inactive</b> by our admin team.</p>
-
-      {reason_html}
-
-      <p style="margin-top:14px;">
-        If you believe this is a mistake or you need further details, simply reply to this email or reach us on <a href="{WHATSAPP_URL}">WhatsApp</a>.
-      </p>
-
-      <p style="margin-top:14px;">Thank you again for the time we spent working together.</p>
-
-      <p style="margin-top:18px;color:#444;">Kind regards,<br/><b>VoiceGuide Team</b></p>
-    </div>
-    """.strip()
-
-    _send_email(to_email=to_email, subject=subject, text_body=text_body, html_body=_branded(subject, html_body))
+    send_partner_closed_email(to_email, partner_name, reason, language)
 
 
 # -------------------------------------------------

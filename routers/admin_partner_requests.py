@@ -98,6 +98,7 @@ def reject_partner_request(
         send_partner_request_rejected_email(
             to_email=req.email,
             partner_name=req.name,
+            language=req.language,
         )
     except Exception as e:
         logger.warning(
@@ -161,6 +162,7 @@ def approve_partner_request(
         referral_code=code,
         commission_pct=final_commission,
         is_active=True,
+        language=req.language,
     )
     db.add(partner)
 
@@ -179,6 +181,7 @@ def approve_partner_request(
             referral_code=code,
             commission_pct=str(final_commission),
             tier=str(chosen_tier),
+            language=req.language,
         )
     except Exception as e:
         logger.warning(

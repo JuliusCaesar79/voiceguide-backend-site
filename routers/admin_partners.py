@@ -199,6 +199,7 @@ def admin_set_partner_tier(
             old_tier=old_tier,
             new_tier=chosen_tier,
             commission_pct=str(final_comm),
+            language=partner.language,
         )
     except Exception as e:
         logger.warning("Email tier change fallita partner_id=%s: %s", partner_id, str(e))
@@ -233,6 +234,7 @@ def admin_set_partner_active(
                 to_email=partner.email,
                 partner_name=partner.name,
                 reason=reason or "",
+                language=partner.language,
             )
         except Exception as e:
             logger.warning("Email chiusura collaborazione fallita partner_id=%s: %s", partner_id, str(e))

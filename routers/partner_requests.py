@@ -157,6 +157,7 @@ def create_partner_request(payload: dict, db: Session = Depends(get_db)):
         partner_tier=partner_tier,  # string coerente col DB ENUM
         notes=notes,
         status=PartnerRequestStatus.PENDING,
+        language=(parsed_public.language or "it")[:5] if parsed_public is not None else None,
     )
 
     db.add(req)
