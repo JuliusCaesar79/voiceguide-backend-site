@@ -5,6 +5,7 @@ con barra gialla su fondo crema, pulsanti degli store e piè di pagina.
 Tutto con stili in linea, perché i programmi di posta ignorano i fogli di stile.
 """
 from html import escape
+from urllib.parse import quote
 
 SITE_URL = "https://www.voiceguideapp.com"
 LOGO_URL = f"{SITE_URL}/brand/voiceguide-airlink-logo.png"
@@ -130,6 +131,42 @@ def steps_block(lang: str) -> str:
         f'<p style="margin:0 0 8px;font-size:15px;font-weight:bold;">{escape(COMMON[lang]["how"])}</p>'
         f'<ol style="margin:0 0 18px;padding-left:20px;font-size:14px;line-height:1.55;color:#2A2E36;">{items}</ol>'
     )
+
+
+# Pagina /join del sito: la guida la manda al gruppo il giorno prima, ogni
+# ospite la vede nella lingua del proprio telefono.
+JOIN_URL = "https://voiceguideapp.com/join"
+
+GUESTS = {
+    "it": {"title": "Prepara i tuoi ospiti", "text": "Il giorno prima manda al gruppo questo link: spiega, nella lingua di ognuno, come scaricare l'app gratuita e di portare gli auricolari. Così il tour parte in orario.", "whatsapp": "Invia su WhatsApp",
+           "message": "Per la visita guidata useremo VoiceGuide AirLink: sentirai la guida nei tuoi auricolari. Prima del tour scarica l'app gratuita e porta gli auricolari:"},
+    "en": {"title": "Get your guests ready", "text": "The day before, send your group this link: it explains, in each guest's language, how to download the free app and to bring earphones. That way the tour starts on time.", "whatsapp": "Send on WhatsApp",
+           "message": "On our guided tour we'll use VoiceGuide AirLink: you'll hear the guide in your earphones. Before the tour, download the free app and bring your earphones:"},
+    "fr": {"title": "Préparez vos participants", "text": "La veille, envoyez ce lien au groupe : il explique, dans la langue de chacun, comment télécharger l'application gratuite et d'apporter des écouteurs. Ainsi, la visite commence à l'heure.", "whatsapp": "Envoyer sur WhatsApp",
+           "message": "Pour la visite guidée, nous utiliserons VoiceGuide AirLink : vous entendrez le guide dans vos écouteurs. Avant la visite, téléchargez l'application gratuite et apportez vos écouteurs :"},
+    "es": {"title": "Prepara a tus participantes", "text": "El día antes, envía este enlace al grupo: explica, en el idioma de cada uno, cómo descargar la app gratuita y que lleven auriculares. Así el tour empieza a tiempo.", "whatsapp": "Enviar por WhatsApp",
+           "message": "En la visita guiada usaremos VoiceGuide AirLink: oirás al guía en tus auriculares. Antes del tour, descarga la app gratuita y lleva tus auriculares:"},
+    "de": {"title": "Bereiten Sie Ihre Gäste vor", "text": "Senden Sie der Gruppe am Vortag diesen Link: Er erklärt in der Sprache jedes Gastes, wie man die kostenlose App lädt und dass Kopfhörer mitzubringen sind. So startet die Tour pünktlich.", "whatsapp": "Per WhatsApp senden",
+           "message": "Bei unserer Führung nutzen wir VoiceGuide AirLink: Sie hören den Guide in Ihren Kopfhörern. Laden Sie vor der Tour die kostenlose App herunter und bringen Sie Kopfhörer mit:"},
+}
+
+
+def guests_block(lang: str) -> str:
+    g = GUESTS[lang]
+    wa = "https://wa.me/?text=" + quote(f'{g["message"]} {JOIN_URL}')
+    return (
+        '<div style="background:#FFF1C7;border-radius:14px;padding:16px 18px;margin:0 0 20px;">'
+        f'<p style="margin:0 0 6px;font-size:15px;font-weight:bold;">{escape(g["title"])}</p>'
+        f'<p style="margin:0 0 10px;font-size:14px;line-height:1.55;color:#4A4F5A;">{escape(g["text"])}</p>'
+        f'<p style="margin:0 0 12px;font-size:15px;font-weight:bold;"><a href="{JOIN_URL}" style="color:#9A6B00;">voiceguideapp.com/join</a></p>'
+        f'<a href="{escape(wa)}" style="display:inline-block;background:#14161B;color:#FFFFFF;text-decoration:none;font-weight:bold;font-size:14px;padding:11px 18px;border-radius:999px;">{escape(g["whatsapp"])}</a>'
+        "</div>"
+    )
+
+
+def guests_text(lang: str) -> list[str]:
+    g = GUESTS[lang]
+    return ["", g["title"], g["text"], JOIN_URL]
 
 
 def store_buttons() -> str:

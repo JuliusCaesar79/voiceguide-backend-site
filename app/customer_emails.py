@@ -13,6 +13,8 @@ from app.email_layout import (
     codes_box,
     details,
     footer_text,
+    guests_block,
+    guests_text,
     layout,
     norm_lang,
     p,
@@ -134,11 +136,12 @@ def send_payment_confirmed(
         + (codes_box(code_rows) if codes else "")
         + steps_block(lang)
         + store_buttons()
+        + guests_block(lang)
         + p(t["multi"] if multi else t["one"], muted=True)
         + p(t["note"], muted=True)
         + signoff(lang)
     )
-    text = [t["title"], "", t["intro"], ""] + [f"{k}: {v}" for k, v in rows] + [""] + codes + [""] + steps_text(lang) + ["", t["multi"] if multi else t["one"], t["note"]] + footer_text(lang)
+    text = [t["title"], "", t["intro"], ""] + [f"{k}: {v}" for k, v in rows] + [""] + codes + [""] + steps_text(lang) + guests_text(lang) + ["", t["multi"] if multi else t["one"], t["note"]] + footer_text(lang)
     _send_email(to_email=to_email, subject=t["subject"], text_body="\n".join(text), html_body=layout(t["title"], inner, lang))
 
 
@@ -162,8 +165,9 @@ def send_trial_license(to_email: str, license_code: str, max_guests: int, name: 
         + codes_box([(license_code, guests)])
         + steps_block(lang)
         + store_buttons()
+        + guests_block(lang)
         + button(t["buy"], f"{SITE_URL}/{lang}#prezzi")
         + signoff(lang)
     )
-    text = ([hello, ""] if hello else []) + [t["intro"], "", f"{license_code} — {guests}", ""] + steps_text(lang) + footer_text(lang)
+    text = ([hello, ""] if hello else []) + [t["intro"], "", f"{license_code} — {guests}", ""] + steps_text(lang) + guests_text(lang) + footer_text(lang)
     _send_email(to_email=to_email, subject=t["subject"], text_body="\n".join(text), html_body=layout(t["title"], inner, lang))

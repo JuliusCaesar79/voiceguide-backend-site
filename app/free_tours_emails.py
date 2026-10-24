@@ -7,7 +7,7 @@ Stile del sito rinnovato (fondo crema, giallo VoiceGuide).
 """
 from html import escape
 
-from app.email_layout import APP_STORE_URL, PLAY_STORE_URL, STEPS, WHATSAPP_URL, layout
+from app.email_layout import APP_STORE_URL, PLAY_STORE_URL, STEPS, WHATSAPP_URL, guests_block, guests_text, layout
 from app.email_service import _send_email
 
 SITE_URL = "https://www.voiceguideapp.com"
@@ -151,6 +151,7 @@ def send_free_tours_licenses_email(
         <a href="{APP_STORE_URL}" style="display:inline-block;background:#14161B;color:#FFFFFF;text-decoration:none;font-weight:bold;font-size:14px;padding:12px 18px;border-radius:999px;margin:0 6px 6px 0;">App Store</a>
         <a href="{PLAY_STORE_URL}" style="display:inline-block;background:#14161B;color:#FFFFFF;text-decoration:none;font-weight:bold;font-size:14px;padding:12px 18px;border-radius:999px;margin:0 6px 6px 0;">Google Play</a>
       </p>
+      {guests_block(lang)}
       <p style="margin:0 0 6px;font-size:14px;line-height:1.55;color:#4A4F5A;">{escape(t["help"])}</p>
       <p style="margin:0 0 20px;font-size:14px;"><a href="{pricing_url}" style="color:#9A6B00;font-weight:bold;">{escape(t["buy"])} →</a></p>
       <p style="margin:0;font-size:14px;color:#14161B;">{escape(t["signoff"])}</p>
@@ -159,6 +160,7 @@ def send_free_tours_licenses_email(
     text_lines += [f"{code} — {t['guests'].format(n=n)}" for code, n in licenses]
     text_lines += ["", t["how_title"]]
     text_lines += [f"{i}. {s}" for i, s in enumerate(STEPS[lang], 1)]
+    text_lines += guests_text(lang)
     text_lines += ["", t["notes"], "", f"App Store: {APP_STORE_URL}", f"Google Play: {PLAY_STORE_URL}", "", t["help"], WHATSAPP_URL, "", t["signoff"]]
 
     _send_email(
@@ -277,6 +279,7 @@ def build_free_tours_reminder_email(
         <a href="{APP_STORE_URL}" style="display:inline-block;background:#14161B;color:#FFFFFF;text-decoration:none;font-weight:bold;font-size:14px;padding:12px 18px;border-radius:999px;margin:0 6px 6px 0;">App Store</a>
         <a href="{PLAY_STORE_URL}" style="display:inline-block;background:#14161B;color:#FFFFFF;text-decoration:none;font-weight:bold;font-size:14px;padding:12px 18px;border-radius:999px;margin:0 6px 6px 0;">Google Play</a>
       </p>
+      {guests_block(lang)}
       <p style="margin:0 0 20px;font-size:14px;line-height:1.55;color:#4A4F5A;">{escape(r["help"])}</p>
       <p style="margin:0 0 20px;font-size:14px;color:#14161B;">{escape(t["signoff"])}</p>
       <p style="margin:0;font-size:12px;line-height:1.5;color:#8A8F99;">{escape(r["unsub"])} <a href="{escape(unsubscribe_url)}" style="color:#8A8F99;">{escape(r["unsub_link"])}</a></p>
@@ -285,6 +288,7 @@ def build_free_tours_reminder_email(
     text_lines += [f"{code} — {t['guests'].format(n=n)}" for code, n in licenses]
     text_lines += ["", r["tip_title"], r["tip"], "", t["how_title"]]
     text_lines += [f"{i}. {s}" for i, s in enumerate(STEPS[lang], 1)]
+    text_lines += guests_text(lang)
     text_lines += ["", f"App Store: {APP_STORE_URL}", f"Google Play: {PLAY_STORE_URL}", "", r["help"], "", t["signoff"]]
     text_lines += ["", f"{r['unsub']} {unsubscribe_url}"]
 
