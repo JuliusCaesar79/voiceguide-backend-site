@@ -3,7 +3,8 @@
 Dashboard admin: registrazioni con 3 tour gratuiti.
 
 GET /admin/free-tours  → riepilogo + elenco dei registrati, con quanti dei
-3 codici ognuno ha davvero attivato (stato letto da AirLink in una chiamata).
+3 codici ognuno ha davvero attivato (stato letto da AirLink in una chiamata)
+e se poi ha comprato (ordini pagati con la stessa email normalizzata).
 """
 import logging
 from datetime import datetime, timedelta, timezone
@@ -13,9 +14,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.email_guard import normalize_email
 from models.admin import Admin
 from models.free_tour_signups import FreeTourSignup
 from models.licenses import License
+from models.orders import Order, PaymentStatus
 from routers.admin_licenses import _env
 from routers.auth_admin import get_current_admin
 from routers.free_tours import ISSUED_BY
@@ -71,6 +74,11 @@ def list_free_tours(
 
     activations = _airlink_activations([lic.code for lic in licenses])
 
+    # Acquisti dei registrati: ordini pagati, email confrontata normalizzata
+    paid_by_email: dict[str, list[Order]] = {}
+    for o in db.query(Order).filter(Order.payment_status == PaymentStatus.PAID).all():
+        paid_by_email.setdefault(normalize_email(o.buyer_email), []).append(o)
+
     def aware(d):
         return d if d is None or d.tzinfo else d.replace(tzinfo=timezone.utc)
 
@@ -83,6 +91,7 @@ def list_free_tours(
             act = activations.get(lic.code) if activations is not None else None
             used_total += 1 if act else 0
             rows.append({"code": lic.code, "max_guests": lic.max_guests, "activated_at": act})
+        orders = paid_by_email.get(s.email_normalized, [])
         items.append(
             {
                 "id": s.id,
@@ -91,6 +100,8 @@ def list_free_tours(
                 "registered_at": s.verified_at,
                 "licenses": rows,
                 "used": sum(1 for r in rows if r["activated_at"]),
+                "orders_paid": len(orders),
+                "spent": round(sum(float(o.total_amount or 0) for o in orders), 2),
             }
         )
 
@@ -106,6 +117,8 @@ def list_free_tours(
             "codes_sent_not_confirmed": pending,
             "tours_used": used_total,
             "registrants_who_used": sum(1 for i in items if i["used"] > 0),
+            "registrants_who_bought": sum(1 for i in items if i["orders_paid"] > 0),
+            "revenue_from_registrants": round(sum(i["spent"] for i in items), 2),
             "airlink_status_available": activations is not None,
         },
         "items": items,
