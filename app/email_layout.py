@@ -12,6 +12,9 @@ LOGO_URL = f"{SITE_URL}/brand/voiceguide-airlink-logo.png"
 PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.voiceguideairlinkbare&pcampaignid=web_share"
 APP_STORE_URL = "https://apps.apple.com/it/app/voiceguide-airlink/id6757807346"
 WHATSAPP_URL = "https://wa.me/393755908650"
+# Link diretti alla scheda recensioni degli store
+APP_STORE_REVIEW_URL = "https://apps.apple.com/app/id6757807346?action=write-review"
+PLAY_STORE_REVIEW_URL = "https://play.google.com/store/apps/details?id=com.voiceguideairlinkbare&showAllReviews=true"
 
 LANGS = ("it", "en", "fr", "es", "de")
 

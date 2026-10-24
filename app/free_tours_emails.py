@@ -7,7 +7,7 @@ Stile del sito rinnovato (fondo crema, giallo VoiceGuide).
 """
 from html import escape
 
-from app.email_layout import APP_STORE_URL, PLAY_STORE_URL, STEPS, WHATSAPP_URL, guests_block, guests_text, layout
+from app.email_layout import APP_STORE_REVIEW_URL, APP_STORE_URL, PLAY_STORE_REVIEW_URL, PLAY_STORE_URL, STEPS, WHATSAPP_URL, guests_block, guests_text, layout
 from app.email_service import _send_email
 
 SITE_URL = "https://www.voiceguideapp.com"
@@ -324,6 +324,7 @@ FOLLOWUP = {
         "title": "Com'è andato il tour?",
         "intro": "Qualche giorno fa hai usato il tuo primo codice VoiceGuide AirLink. Speriamo che il gruppo ti abbia sentito forte e chiaro!",
         "ask": "Ci racconti com'è andata? Basta rispondere a questa email, anche con due righe: le leggiamo tutte e ci aiutano a migliorare l'app.",
+        "review": "Ti è piaciuta? Una recensione sullo store ci aiuta tantissimo: è lì che le altre guide guardano le stelline prima di provare l'app.",
         "remaining": "Ti restano ancora questi codici:",
         "pricing": "Quando ti serviranno altri tour, li compri uno alla volta, senza abbonamento: €3,99 fino a 5 ospiti, €14,99 fino a 25. Se fai tour spesso, con il pacchetto da 5 tour (25 ospiti) ogni tour costa €12.",
         "unsub": "Non vuoi ricevere altre email come questa?",
@@ -333,6 +334,7 @@ FOLLOWUP = {
         "title": "How did the tour go?",
         "intro": "A few days ago you used your first VoiceGuide AirLink code. We hope your group heard you loud and clear!",
         "ask": "Will you tell us how it went? Just reply to this email, even with a couple of lines: we read every reply and it helps us improve the app.",
+        "review": "Did you like it? A store review helps us a lot: that's where other guides check the stars before trying the app.",
         "remaining": "You still have these codes:",
         "pricing": "When you need more tours, buy them one at a time, no subscription: €3.99 for up to 5 guests, €14.99 for up to 25. If you guide often, with the 5-tour pack (25 guests) each tour costs €12.",
         "unsub": "Don't want any more emails like this?",
@@ -342,6 +344,7 @@ FOLLOWUP = {
         "title": "Comment s'est passée la visite ?",
         "intro": "Il y a quelques jours, vous avez utilisé votre premier code VoiceGuide AirLink. Nous espérons que votre groupe vous a entendu haut et clair !",
         "ask": "Vous nous racontez comment ça s'est passé ? Il suffit de répondre à cet e-mail, même en deux lignes : nous lisons toutes les réponses et elles nous aident à améliorer l'application.",
+        "review": "Elle vous a plu ? Un avis sur le store nous aide énormément : c'est là que les autres guides regardent les étoiles avant d'essayer l'application.",
         "remaining": "Il vous reste encore ces codes :",
         "pricing": "Quand il vous faudra d'autres visites, achetez-les une à la fois, sans abonnement : 3,99 € jusqu'à 5 participants, 14,99 € jusqu'à 25. Si vous guidez souvent, avec le pack 5 visites (25 participants), chaque visite revient à 12 €.",
         "unsub": "Vous ne voulez plus recevoir d'e-mails comme celui-ci ?",
@@ -351,6 +354,7 @@ FOLLOWUP = {
         "title": "¿Qué tal fue el tour?",
         "intro": "Hace unos días usaste tu primer código de VoiceGuide AirLink. ¡Esperamos que tu grupo te haya oído alto y claro!",
         "ask": "¿Nos cuentas qué tal fue? Basta con responder a este email, aunque sea con dos líneas: leemos todas las respuestas y nos ayudan a mejorar la app.",
+        "review": "¿Te ha gustado? Una reseña en la tienda nos ayuda muchísimo: ahí es donde otros guías miran las estrellas antes de probar la app.",
         "remaining": "Todavía te quedan estos códigos:",
         "pricing": "Cuando necesites más tours, cómpralos de uno en uno, sin suscripción: 3,99 € hasta 5 participantes, 14,99 € hasta 25. Si haces tours a menudo, con el pack de 5 tours (25 participantes) cada tour sale a 12 €.",
         "unsub": "¿No quieres recibir más emails como este?",
@@ -360,6 +364,7 @@ FOLLOWUP = {
         "title": "Wie war die Tour?",
         "intro": "Vor ein paar Tagen haben Sie Ihren ersten Code für VoiceGuide AirLink genutzt. Wir hoffen, Ihre Gruppe hat Sie laut und deutlich gehört!",
         "ask": "Erzählen Sie uns, wie es war? Antworten Sie einfach auf diese E-Mail, gern auch in zwei Zeilen: Wir lesen jede Antwort, und sie hilft uns, die App zu verbessern.",
+        "review": "Hat es Ihnen gefallen? Eine Bewertung im Store hilft uns sehr: Dort schauen andere Guides auf die Sterne, bevor sie die App ausprobieren.",
         "remaining": "Diese Codes haben Sie noch:",
         "pricing": "Wenn Sie weitere Touren brauchen, kaufen Sie sie einzeln, ohne Abo: 3,99 € bis 5 Gäste, 14,99 € bis 25. Wenn Sie oft führen, kostet mit dem 5-Touren-Paket (25 Gäste) jede Tour 12 €.",
         "unsub": "Sie möchten keine solchen E-Mails mehr?",
@@ -396,6 +401,11 @@ def build_free_tours_followup_email(
     inner = f"""
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#4A4F5A;">{escape(f["intro"])}</p>
       <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#14161B;font-weight:bold;">{escape(f["ask"])}</p>
+      <p style="margin:0 0 10px;font-size:14px;line-height:1.55;color:#4A4F5A;">{escape(f["review"])}</p>
+      <p style="margin:0 0 22px;">
+        <a href="{APP_STORE_REVIEW_URL}" style="display:inline-block;background:#14161B;color:#FFFFFF;text-decoration:none;font-weight:bold;font-size:14px;padding:12px 18px;border-radius:999px;margin:0 6px 6px 0;">&#9733; App Store</a>
+        <a href="{PLAY_STORE_REVIEW_URL}" style="display:inline-block;background:#14161B;color:#FFFFFF;text-decoration:none;font-weight:bold;font-size:14px;padding:12px 18px;border-radius:999px;margin:0 6px 6px 0;">&#9733; Google Play</a>
+      </p>
       {codes_html}
       <p style="margin:0 0 16px;font-size:14px;line-height:1.55;color:#4A4F5A;">{escape(f["pricing"])}</p>
       <p style="margin:0 0 22px;">
@@ -404,7 +414,7 @@ def build_free_tours_followup_email(
       <p style="margin:0 0 20px;font-size:14px;color:#14161B;">{escape(t["signoff"])}</p>
       <p style="margin:0;font-size:12px;line-height:1.5;color:#8A8F99;">{escape(f["unsub"])} <a href="{escape(unsubscribe_url)}" style="color:#8A8F99;">{escape(unsub)}</a></p>
     """
-    text_lines = [f["title"], "", f["intro"], "", f["ask"], ""]
+    text_lines = [f["title"], "", f["intro"], "", f["ask"], "", f["review"], f"App Store: {APP_STORE_REVIEW_URL}", f"Google Play: {PLAY_STORE_REVIEW_URL}", ""]
     if remaining:
         text_lines += [f["remaining"]] + [f"{code} — {t['guests'].format(n=n)}" for code, n in remaining] + [""]
     text_lines += [f["pricing"], f"{t['buy']}: {pricing_url}", "", t["signoff"], "", f"{f['unsub']} {unsubscribe_url}"]
