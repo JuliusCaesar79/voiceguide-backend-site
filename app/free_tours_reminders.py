@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import update
 
 from app.db import SessionLocal
+from app.email_layout import SITE_URL
 from app.free_tours_emails import send_free_tours_followup_email, send_free_tours_reminder_email
 from models.free_tour_signups import FreeTourSignup
 from models.licenses import License
@@ -32,20 +33,15 @@ FOLLOWUP_AFTER_DAYS = 2
 CHECK_EVERY_SECONDS = 3600
 
 
-def _api_base() -> str:
-    explicit = os.getenv("PUBLIC_API_URL")
-    if explicit:
-        return explicit.rstrip("/")
-    return f"https://{os.getenv('RAILWAY_PUBLIC_DOMAIN', 'localhost:8000')}"
-
-
 def unsubscribe_token(signup_id: int) -> str:
     key = f"free-tours-unsub:{os.environ['JWT_SECRET_KEY']}".encode()
     return hmac.new(key, str(signup_id).encode(), hashlib.sha256).hexdigest()[:32]
 
 
 def unsubscribe_url(signup_id: int, lang: str) -> str:
-    return f"{_api_base()}/free-tours/unsubscribe?id={signup_id}&t={unsubscribe_token(signup_id)}&lang={lang}"
+    # Sul dominio del sito: Vercel lo gira a questo backend (rewrite in
+    # next.config.ts del sito). I vecchi link railway.app funzionano ancora.
+    return f"{SITE_URL}/free-tours/unsubscribe?id={signup_id}&t={unsubscribe_token(signup_id)}&lang={lang}"
 
 
 def _parse_dt(value) -> datetime | None:
