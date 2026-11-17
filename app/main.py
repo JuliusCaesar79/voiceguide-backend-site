@@ -20,6 +20,7 @@ from routers import free_tours_unsubscribe
 from app.free_tours_reminders import start_reminder_loop
 from routers import admin_partner_requests, partner_requests
 from routers import checkout
+from routers import app_licenses  # "Le mie licenze" nell'app
 from routers import stripe_webhook  # ✅ Webhooks Stripe
 # Chat del sito tolta il 2026-10-20: su voiceguideapp.com risponde IoAlly.
 
@@ -97,6 +98,7 @@ app.include_router(admin_partner_requests.router)
 app.include_router(partner_requests.router)
 
 app.include_router(checkout.router)
+app.include_router(app_licenses.router)
 
 app.include_router(stripe_webhook.router)  # ✅ webhooks
 
