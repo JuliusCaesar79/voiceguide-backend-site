@@ -90,6 +90,17 @@ def _parse_dt(v) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def _source(lic: License) -> str:
+    """Da dove viene la licenza, senza esporre chi l'ha emessa."""
+    if lic.order_id:
+        return "order"
+    if lic.issued_by_admin == "free_signup":
+        return "free"
+    if lic.issued_by_admin == "auto":
+        return "trial"
+    return "gift"
+
+
 @router.get("/my-licenses")
 def my_licenses(
     authorization: str | None = Header(default=None),
@@ -142,7 +153,7 @@ def my_licenses(
                 "type": lic.license_type.value if lic.license_type else None,
                 "max_guests": lic.max_guests,
                 "duration_hours": duration_h,
-                "source": "order" if lic.order_id else (lic.issued_by_admin or "manual"),
+                "source": _source(lic),
                 "created_at": lic.created_at.isoformat() if lic.created_at else None,
                 "activated_at": activated_at.isoformat() if activated_at else None,
                 "expires_at": expires_at.isoformat() if expires_at else None,
