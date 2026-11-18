@@ -184,6 +184,8 @@ def fulfill_paid_order(
     db: Session,
     order: Order,
     stripe_session: Optional[dict[str, Any]] = None,
+    license_notes: Optional[str] = None,
+    issued_to_email: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Fulfillment idempotente:
@@ -286,6 +288,10 @@ def fulfill_paid_order(
             license_type=license_type,
             max_guests=max_guests,
             order_id=order.id,
+            # Acquisti in app (RevenueCat): traccia della transazione dello
+            # store e email dell'account, per "Le mie licenze".
+            notes=license_notes,
+            issued_to_email=issued_to_email,
         )
         db.add(lic)
         created_codes.append(code)
