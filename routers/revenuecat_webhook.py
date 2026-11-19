@@ -14,8 +14,10 @@ Cosa fa:
     RevenueCat), quindi compare subito in "Le mie licenze".
   - rimborso di una licenza (CANCELLATION / REFUND): ordine REFUNDED e
     licenza disattivata; da "Le mie licenze" sparisce.
-  - tutto il resto (tour a tappe, abbonamento Pro): per ora solo registrato
-    nei log; verrà gestito nei passi successivi.
+  - licenze `live_N_pro`: le stesse, prezzo Pro (-20%), vendute solo alle
+    guide Pro;
+  - abbonamento Pro: `routers/revenuecat_pro.py` (Supabase, premium_until);
+  - tour a tappe: per ora solo registrati nei log.
 
 Idempotente: RevenueCat può mandare lo stesso evento più volte. La chiave è
 l'id della transazione dello store, salvato nelle note della licenza
@@ -39,11 +41,14 @@ from models.orders import Order, OrderType, PaymentMethod, PaymentStatus
 from models.packages import Package
 from routers.admin_licenses import _env
 from routers.checkout import _resolve_single_package_id
+from routers.revenuecat_pro import handle_pro_event, is_pro_event
 
 router = APIRouter(prefix="/api/webhooks", tags=["Webhooks"])
 logger = logging.getLogger(__name__)
 
-LIVE_PRODUCT = re.compile(r"^live_(\d+)$")
+# `live_5` … `live_100` e le stesse con lo sconto Pro (-20%): `live_5_pro` …
+LIVE_PRODUCT = re.compile(r"^live_(\d+)(_pro)?$")
+PRO_DISCOUNT = Decimal("0.80")
 PURCHASE_EVENTS = {"NON_RENEWING_PURCHASE", "INITIAL_PURCHASE"}
 REFUND_EVENTS = {"CANCELLATION", "REFUND"}
 SUPPORTED_LANGS = {"it", "en", "fr", "es", "de"}
@@ -80,7 +85,7 @@ def _find_licenses(db: Session, key: str) -> list[License]:
     return db.query(License).filter(License.notes == key).all()
 
 
-def _handle_live_purchase(db: Session, event: dict[str, Any], max_guests: int) -> dict:
+def _handle_live_purchase(db: Session, event: dict[str, Any], max_guests: int, pro_price: bool = False) -> dict:
     key = _tx_key(event)
     if not key:
         raise HTTPException(status_code=400, detail="Missing transaction_id")
@@ -103,6 +108,8 @@ def _handle_live_purchase(db: Session, event: dict[str, Any], max_guests: int) -
     package_id = _resolve_single_package_id(db, max_guests=max_guests)
     pkg = db.query(Package).filter(Package.id == package_id).first()
     price = Decimal(str(pkg.price)) if pkg and pkg.price is not None else Decimal("0")
+    if pro_price:
+        price = (price * PRO_DISCOUNT).quantize(Decimal("0.01"))
 
     order = Order(
         buyer_email=email,
@@ -168,9 +175,12 @@ async def revenuecat_webhook(
     if etype == "TEST":
         return {"ok": True, "status": "test"}
 
+    if is_pro_event(event):
+        return handle_pro_event(event)
+
     m = LIVE_PRODUCT.match(product)
     if m and etype in PURCHASE_EVENTS:
-        return _handle_live_purchase(db, event, int(m.group(1)))
+        return _handle_live_purchase(db, event, int(m.group(1)), pro_price=bool(m.group(2)))
 
     if m and etype in REFUND_EVENTS:
         # Per un acquisto singolo (non un abbonamento) CANCELLATION vuol dire
