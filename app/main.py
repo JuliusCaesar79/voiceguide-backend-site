@@ -8,6 +8,11 @@ from dotenv import load_dotenv
 # ----------------------------------------------------
 load_dotenv(override=True)
 
+# I messaggi informativi dei nostri moduli (es. "RevenueCat Pro: … Pro fino al …")
+# finiscono nei log di Railway.
+import logging
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
 from app.db import engine
 from models import Base
 
