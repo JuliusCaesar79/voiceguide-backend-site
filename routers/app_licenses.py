@@ -51,10 +51,12 @@ def _supabase_email(authorization: str | None) -> str:
         logger.warning("my-licenses: Supabase non raggiungibile: %s", e)
         raise HTTPException(status_code=503, detail="Auth unavailable")
     if r.status_code != 200:
+        logger.warning("my-licenses: token rifiutato da Supabase (%s): %s", r.status_code, r.text[:160])
         raise HTTPException(status_code=401, detail="Invalid token")
     user = r.json() or {}
     email = (user.get("email") or "").strip().lower()
     if not email or not user.get("email_confirmed_at"):
+        logger.warning("my-licenses: account %s senza email confermata", user.get("id"))
         raise HTTPException(status_code=401, detail="Email not confirmed")
     return email
 
