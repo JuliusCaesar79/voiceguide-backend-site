@@ -17,7 +17,8 @@ Cosa fa:
   - licenze `live_N_pro`: le stesse, prezzo Pro (-20%), vendute solo alle
     guide Pro;
   - abbonamento Pro: `routers/revenuecat_pro.py` (Supabase, premium_until);
-  - tour a tappe: per ora solo registrati nei log.
+  - tour a tappe (`tour_299` …): routers/app_tour_purchases.py (Supabase,
+    tabella tour_purchases; rimborso = tour richiuso).
 
 Idempotente: RevenueCat può mandare lo stesso evento più volte. La chiave è
 l'id della transazione dello store, salvato nelle note della licenza
@@ -43,6 +44,7 @@ from models.packages import Package
 from routers.admin_licenses import _env
 from routers.checkout import _resolve_single_package_id
 from routers.revenuecat_pro import handle_pro_event, is_pro_event
+from routers.app_tour_purchases import handle_tour_event, tour_product
 
 router = APIRouter(prefix="/api/webhooks", tags=["Webhooks"])
 logger = logging.getLogger(__name__)
@@ -216,6 +218,9 @@ async def revenuecat_webhook(
         # Per un acquisto singolo (non un abbonamento) CANCELLATION vuol dire
         # che il pagamento è stato rimborsato.
         return _handle_refund(db, event)
+
+    if tour_product(product) and etype in PURCHASE_EVENTS | REFUND_EVENTS:
+        return handle_tour_event(event, refund=etype in REFUND_EVENTS)
 
     logger.info("RevenueCat: evento %s per %s (non ancora gestito)", etype, product)
     return {"ok": True, "status": "ignored"}

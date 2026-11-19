@@ -28,6 +28,7 @@ from routers import checkout
 from routers import app_licenses  # "Le mie licenze" nell'app
 from routers import stripe_webhook  # ✅ Webhooks Stripe
 from routers import revenuecat_webhook  # acquisti in app (RevenueCat)
+from routers import app_tour_purchases  # acquisto dei tour a tappe in app
 # Chat del sito tolta il 2026-10-20: su voiceguideapp.com risponde IoAlly.
 
 # ----------------------------------------------------
@@ -108,6 +109,7 @@ app.include_router(app_licenses.router)
 
 app.include_router(stripe_webhook.router)  # ✅ webhooks
 app.include_router(revenuecat_webhook.router)  # acquisti in app
+app.include_router(app_tour_purchases.router)  # acquisto dei tour in app
 
 # ----------------------------------------------------
 # 🏠 BASE
