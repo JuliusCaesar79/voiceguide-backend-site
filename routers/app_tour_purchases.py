@@ -43,6 +43,9 @@ TOUR_PRODUCT = re.compile(r"^(tour_(\d+))(?::.*)?$")
 # Una richiesta vale per un pagamento fatto entro questo tempo.
 INTENT_MAX_AGE = timedelta(hours=2)
 CLOCK_SLACK = timedelta(minutes=2)
+# Chi ha già avuto questo numero di rimborsi di tour non può più comprarne
+# dall'app (deciso da Stefano il 2026-11-19).
+MAX_REFUNDS = 2
 
 
 def tour_product(product_id: Optional[str]) -> Optional[str]:
@@ -292,6 +295,11 @@ def purchase_intent(book_id: str, authorization: Optional[str] = Header(default=
 
     if _rows(base, key, {"user_id": f"eq.{user_id}", "book_id": f"eq.{book_id}", "status": "eq.active", "select": "id"}):
         return {"status": "owned"}
+
+    refunds = _rows(base, key, {"user_id": f"eq.{user_id}", "status": "eq.refunded", "select": "id", "limit": str(MAX_REFUNDS)})
+    if len(refunds) >= MAX_REFUNDS:
+        logger.warning("Tour: acquisto rifiutato a %s (%s rimborsi)", user_id, len(refunds))
+        raise HTTPException(status_code=403, detail="too_many_refunds")
 
     # Una sola richiesta aperta per utente: così il pagamento si abbina senza dubbi.
     requests.delete(
