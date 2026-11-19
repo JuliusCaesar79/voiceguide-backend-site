@@ -271,7 +271,10 @@ def handle_tour_event(event: dict[str, Any], refund: bool) -> dict:
 # ------------------------------------------------------------- endpoint ----
 
 @router.post("/{book_id}/purchase-intent")
-def purchase_intent(book_id: str, authorization: Optional[str] = Header(default=None)):
+def purchase_intent(book_id: str, source: str = "app", authorization: Optional[str] = Header(default=None)):
+    # source=guide_link: il turista è arrivato dal link di vendita della guida
+    # (tappa 4): la quota della guida sale a 80/90% (calcolata da Supabase).
+    source = "guide_link" if source == "guide_link" else "app"
     user_id = _user_id(authorization)
     if not UUID_RE.match(book_id):
         raise HTTPException(status_code=404, detail="not_found")
@@ -317,11 +320,12 @@ def purchase_intent(book_id: str, authorization: Optional[str] = Header(default=
             "book_title": book.get("title") or "",
             "product_id": product,
             "status": "pending",
+            "source": source,
         },
         headers=_headers(key, {"Prefer": "return=minimal"}),
         timeout=10,
     ).raise_for_status()
-    logger.info("Tour: richiesta di %s per il tour %s (%s)", user_id, book_id, product)
+    logger.info("Tour: richiesta di %s per il tour %s (%s, %s)", user_id, book_id, product, source)
     return {"status": "ready", "product_id": product}
 
 
