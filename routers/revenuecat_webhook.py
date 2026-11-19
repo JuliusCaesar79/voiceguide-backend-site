@@ -31,6 +31,7 @@ import re
 from decimal import Decimal
 from typing import Any, Optional
 
+import requests
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -156,8 +157,37 @@ def _handle_refund(db: Session, event: dict[str, Any]) -> dict:
         order.payment_status = PaymentStatus.REFUNDED
         db.add(order)
     db.commit()
+    # Anche sul server del live: senza questo il codice (se copiato) si
+    # potrebbe ancora attivare. Se AirLink non risponde → 502, RevenueCat
+    # ritenta e tutto qui sopra è idempotente.
+    failed = [l.code for l in licenses if not _airlink_block(l.code)]
+    if failed:
+        raise HTTPException(status_code=502, detail="AirLink block failed")
     logger.info("RevenueCat: rimborso %s, licenze disattivate: %s", key, [l.code for l in licenses])
     return {"ok": True, "status": "refunded", "licenses": [l.code for l in licenses]}
+
+
+def _airlink_block(code: str) -> bool:
+    base, secret = _env("AIRLINK_BASE_URL"), _env("AIRLINK_ADMIN_SECRET")
+    if not base or not secret:
+        logger.error("RevenueCat: AIRLINK_BASE_URL / AIRLINK_ADMIN_SECRET mancanti, %s non bloccata", code)
+        return False
+    try:
+        r = requests.post(
+            f"{base.rstrip('/')}/api/admin/licenses/block",
+            json={"code": code},
+            headers={"X-Admin-Secret": secret},
+            timeout=10,
+        )
+        if r.status_code == 404:
+            # mai arrivata su AirLink: non c'è niente da bloccare
+            logger.warning("RevenueCat: licenza %s non trovata su AirLink", code)
+            return True
+        r.raise_for_status()
+        return True
+    except Exception as e:
+        logger.error("RevenueCat: blocco su AirLink fallito per %s: %s", code, e)
+        return False
 
 
 @router.post("/revenuecat")

@@ -147,7 +147,9 @@ def my_licenses(
                 state = "active"
             else:
                 state = "used"
-        if not lic.is_active and state == "new":
+        # Licenza disattivata dal sito (es. rimborso): su AirLink risulta
+        # "usata" perché bloccata, ma per la guida è revocata (non si mostra).
+        if not lic.is_active and state in ("new", "used"):
             state = "revoked"
         items.append(
             {
