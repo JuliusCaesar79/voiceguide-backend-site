@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import requests
@@ -38,6 +38,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SUPABASE_URL = "https://dtbcfjsqwhmdfwkxighr.supabase.co"
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+GRACE = timedelta(days=1)
 
 GRANT_EVENTS = {
     "INITIAL_PURCHASE",
@@ -174,6 +176,12 @@ def handle_pro_event(event: dict[str, Any]) -> dict:
         if refund:
             new_until = min(current, store_until) if current else store_until
         else:
+            # Gli avvisi di RevenueCat arrivano con qualche minuto di ritardo:
+            # per i pagamenti veri 1 giorno di margine, così il giorno del
+            # rinnovo la guida non risulta "non Pro" finché l'avviso non arriva.
+            # Nelle prove (SANDBOX) niente margine, per vedere la scadenza vera.
+            if (event.get("environment") or "PRODUCTION") == "PRODUCTION":
+                store_until = store_until + GRACE
             new_until = max(current, store_until) if current else store_until
         if new_until != current:
             _set_until(base, key, user_id, new_until)
