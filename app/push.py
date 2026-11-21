@@ -203,3 +203,41 @@ def push_license_ready(email: Optional[str], count: int, max_guests: int) -> Non
             logger.warning("Push: avviso licenza non inviato: %s", e)
 
     threading.Thread(target=run, daemon=True).start()
+
+
+def _euro(cents: int, lang: str) -> str:
+    s = f"{cents / 100:.2f}"
+    return s if lang == "en" else s.replace(".", ",")
+
+
+def push_tour_sold(row: dict) -> None:
+    """Avviso alla guida a ogni tour venduto (riga di tour_purchases appena attivata)."""
+    guide_id = row.get("guide_id")
+    if not guide_id or guide_id == row.get("user_id"):
+        return
+    title_tour = (row.get("book_title") or "").strip() or "…"
+    share = int(row.get("guide_share_cents") or 0)
+    from_link = row.get("source") == "guide_link"
+
+    def body(lang: str) -> str:
+        e = _euro(share, lang)
+        link = {
+            "it": " (dal tuo link)", "en": " (from your link)", "es": " (desde tu enlace)",
+            "fr": " (depuis votre lien)", "de": " (über deinen Link)",
+        }[lang] if from_link else ""
+        return {
+            "it": f"«{title_tour}»{link}: +{e} € per te.",
+            "en": f"“{title_tour}”{link}: +€{e} for you.",
+            "es": f"«{title_tour}»{link}: +{e} € para ti.",
+            "fr": f"« {title_tour} »{link} : +{e} € pour vous.",
+            "de": f"„{title_tour}“{link}: +{e} € für dich.",
+        }[lang]
+
+    texts = {
+        "it": ("🐥 Hai venduto un tour!", body("it")),
+        "en": ("🐥 You sold a tour!", body("en")),
+        "es": ("🐥 ¡Has vendido un tour!", body("es")),
+        "fr": ("🐥 Vous avez vendu un tour !", body("fr")),
+        "de": ("🐥 Du hast eine Tour verkauft!", body("de")),
+    }
+    send_push_i18n_async(str(guide_id), texts, {"type": "tour_sold"})

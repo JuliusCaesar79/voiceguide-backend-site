@@ -161,8 +161,16 @@ def confirm_transaction(
             if r.status_code == 409:
                 return "exists"  # l'altra strada (app o webhook) è arrivata prima
             r.raise_for_status()
-            if r.json():
+            rows = r.json()
+            if rows:
                 logger.info("Tour: acquisto %s confermato per %s (tour %s, %s)", tx, user_id, pending[0].get("book_id"), product)
+                # Notifica alla guida: "Hai venduto un tour!" (non blocca mai)
+                try:
+                    from app.push import push_tour_sold
+
+                    push_tour_sold(rows[0])
+                except Exception as e:
+                    logger.warning("Tour: avviso di vendita non inviato: %s", e)
                 return "active"
             # richiesta presa nel frattempo dall'altra strada: ricontrolla
             if _rows(base, key, {"transaction_id": f"eq.{tx}", "select": "id"}):
