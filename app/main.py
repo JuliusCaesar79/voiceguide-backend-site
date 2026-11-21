@@ -23,6 +23,7 @@ from routers import partner_portal, partner_payments_admin, admin_licenses
 from routers import trial_requests, admin_trial_requests, free_tours, admin_free_tours
 from routers import free_tours_unsubscribe
 from app.free_tours_reminders import start_reminder_loop
+from app import play_voided  # rimborsi di Google Play letti da Google (piano B)
 from routers import admin_partner_requests, partner_requests
 from routers import checkout
 from routers import app_licenses  # "Le mie licenze" nell'app
@@ -110,6 +111,7 @@ app.include_router(app_licenses.router)
 app.include_router(stripe_webhook.router)  # ✅ webhooks
 app.include_router(revenuecat_webhook.router)  # acquisti in app
 app.include_router(app_tour_purchases.router)  # acquisto dei tour in app
+app.include_router(play_voided.router)  # rimborsi Google Play (controllo a mano)
 
 # ----------------------------------------------------
 # 🏠 BASE
@@ -124,6 +126,12 @@ def root():
 async def free_tours_reminders():
     if os.getenv("FREE_TOURS_REMINDERS") == "1":
         start_reminder_loop()
+
+
+# Rimborsi di Google Play ogni 6 ore (app/play_voided.py)
+@app.on_event("startup")
+async def play_voided_sync():
+    play_voided.start_voided_loop()
 
 
 @app.get("/health")
