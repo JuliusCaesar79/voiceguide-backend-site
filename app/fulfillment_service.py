@@ -308,4 +308,12 @@ def fulfill_paid_order(
         license_codes=created_codes,
     )
 
+    # Notifica push "La tua licenza è pronta" sul telefono dell'account con questa email
+    try:
+        from app.push import push_license_ready
+
+        push_license_ready(issued_to_email or order.buyer_email, len(created_codes), max_guests)
+    except Exception:
+        logger.exception("Push licenza pronta non avviata per order_id=%s", order.id)
+
     return {"ok": True, "status": "fulfilled", "licenses": created_codes}
