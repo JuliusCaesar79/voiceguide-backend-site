@@ -134,6 +134,14 @@ async def play_voided_sync():
     play_voided.start_voided_loop()
 
 
+# Avvisi ai follower: tour nuovi delle guide seguite, ogni 5 minuti (app/follower_alerts.py)
+@app.on_event("startup")
+async def follower_alerts():
+    from app.follower_alerts import start_follower_alerts_loop
+
+    start_follower_alerts_loop()
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
